@@ -1,10 +1,12 @@
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/AppSidebar';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { useRealtimeInvalidation } from '@/hooks/useRealtimeInvalidation';
 import { Navigate } from 'react-router-dom';
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { workspace, loading, hasWorkspace } = useWorkspace();
+  useRealtimeInvalidation();
 
   if (loading) {
     return (

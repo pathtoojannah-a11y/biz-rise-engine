@@ -11,6 +11,8 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Setup from "./pages/Setup";
 import Dashboard from "./pages/Dashboard";
+import Leads from "./pages/Leads";
+import Pipeline from "./pages/Pipeline";
 import Placeholder from "./pages/Placeholder";
 import NotFound from "./pages/NotFound";
 
@@ -30,8 +32,8 @@ const App = () => (
               <Route path="/signup" element={<Signup />} />
               <Route path="/setup" element={<ProtectedRoute><Setup /></ProtectedRoute>} />
               <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-              <Route path="/leads" element={<ProtectedRoute><Placeholder title="Leads" /></ProtectedRoute>} />
-              <Route path="/pipeline" element={<ProtectedRoute><Placeholder title="Pipeline" /></ProtectedRoute>} />
+              <Route path="/leads" element={<ProtectedRoute><Leads /></ProtectedRoute>} />
+              <Route path="/pipeline" element={<ProtectedRoute><Pipeline /></ProtectedRoute>} />
               <Route path="/automations" element={<ProtectedRoute><Placeholder title="Automations" /></ProtectedRoute>} />
               <Route path="/reviews" element={<ProtectedRoute><Placeholder title="Reviews" /></ProtectedRoute>} />
               <Route path="/website" element={<ProtectedRoute><Placeholder title="Website" /></ProtectedRoute>} />
