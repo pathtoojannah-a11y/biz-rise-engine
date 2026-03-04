@@ -13,6 +13,7 @@ import Setup from "./pages/Setup";
 import Dashboard from "./pages/Dashboard";
 import Leads from "./pages/Leads";
 import Pipeline from "./pages/Pipeline";
+import Automations from "./pages/Automations";
 import Placeholder from "./pages/Placeholder";
 import NotFound from "./pages/NotFound";
 
@@ -34,7 +35,7 @@ const App = () => (
               <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
               <Route path="/leads" element={<ProtectedRoute><Leads /></ProtectedRoute>} />
               <Route path="/pipeline" element={<ProtectedRoute><Pipeline /></ProtectedRoute>} />
-              <Route path="/automations" element={<ProtectedRoute><Placeholder title="Automations" /></ProtectedRoute>} />
+              <Route path="/automations" element={<ProtectedRoute><Automations /></ProtectedRoute>} />
               <Route path="/reviews" element={<ProtectedRoute><Placeholder title="Reviews" /></ProtectedRoute>} />
               <Route path="/website" element={<ProtectedRoute><Placeholder title="Website" /></ProtectedRoute>} />
               <Route path="/analytics" element={<ProtectedRoute><Placeholder title="Analytics" /></ProtectedRoute>} />

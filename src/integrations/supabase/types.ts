@@ -14,6 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      automation_sessions: {
+        Row: {
+          answers: Json
+          created_at: string
+          current_step: string
+          id: string
+          last_message_sid: string | null
+          lead_id: string
+          status: string
+          type: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          answers?: Json
+          created_at?: string
+          current_step?: string
+          id?: string
+          last_message_sid?: string | null
+          lead_id: string
+          status?: string
+          type?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          answers?: Json
+          created_at?: string
+          current_step?: string
+          id?: string
+          last_message_sid?: string | null
+          lead_id?: string
+          status?: string
+          type?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automation_sessions_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "automation_sessions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       calls: {
         Row: {
           created_at: string
