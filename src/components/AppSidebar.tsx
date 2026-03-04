@@ -1,5 +1,6 @@
 import {
   LayoutDashboard, Users, Kanban, Zap, Star, Globe, BarChart3, Settings, LogOut, Hexagon,
+  HeartPulse, Rocket, FlaskConical, CreditCard, UsersRound, TrendingUp,
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useLocation } from 'react-router-dom';
@@ -17,11 +18,18 @@ const mainNav = [
   { title: 'Pipeline', url: '/pipeline', icon: Kanban },
   { title: 'Automations', url: '/automations', icon: Zap },
   { title: 'Reviews', url: '/reviews', icon: Star },
-  { title: 'Website', url: '/website', icon: Globe },
-  { title: 'Analytics', url: '/analytics', icon: BarChart3 },
+  { title: 'ROI', url: '/roi', icon: TrendingUp },
+];
+
+const opsNav = [
+  { title: 'Go Live', url: '/go-live', icon: Rocket },
+  { title: 'Health', url: '/health', icon: HeartPulse },
+  { title: 'QA', url: '/qa', icon: FlaskConical },
+  { title: 'Pilots', url: '/pilots', icon: UsersRound },
 ];
 
 const bottomNav = [
+  { title: 'Billing', url: '/billing', icon: CreditCard },
   { title: 'Settings', url: '/settings', icon: Settings },
 ];
 
@@ -34,6 +42,21 @@ export function AppSidebar() {
 
   const isActive = (path: string) => location.pathname === path || location.pathname.startsWith(path + '/');
 
+  const renderNav = (items: typeof mainNav) => (
+    <SidebarMenu>
+      {items.map((item) => (
+        <SidebarMenuItem key={item.title}>
+          <SidebarMenuButton asChild isActive={isActive(item.url)}>
+            <NavLink to={item.url} className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-sidebar-primary font-medium">
+              <item.icon className="mr-2 h-4 w-4" />
+              {!collapsed && <span>{item.title}</span>}
+            </NavLink>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ))}
+    </SidebarMenu>
+  );
+
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="px-4 py-5">
@@ -43,13 +66,9 @@ export function AppSidebar() {
           </div>
           {!collapsed && (
             <div className="flex flex-col">
-              <span className="font-display text-sm font-bold tracking-tight text-sidebar-foreground">
-                NexaOS
-              </span>
+              <span className="font-display text-sm font-bold tracking-tight text-sidebar-foreground">NexaOS</span>
               {workspace && (
-                <span className="text-[11px] text-sidebar-foreground/50 truncate max-w-[120px]">
-                  {workspace.name}
-                </span>
+                <span className="text-[11px] text-sidebar-foreground/50 truncate max-w-[120px]">{workspace.name}</span>
               )}
             </div>
           )}
@@ -59,35 +78,17 @@ export function AppSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel>Main</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {mainNav.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={isActive(item.url)}>
-                    <NavLink to={item.url} className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-sidebar-primary font-medium">
-                      <item.icon className="mr-2 h-4 w-4" />
-                      {!collapsed && <span>{item.title}</span>}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
+          <SidebarGroupContent>{renderNav(mainNav)}</SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>Operations</SidebarGroupLabel>
+          <SidebarGroupContent>{renderNav(opsNav)}</SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="px-2 pb-4">
+        {renderNav(bottomNav)}
         <SidebarMenu>
-          {bottomNav.map((item) => (
-            <SidebarMenuItem key={item.title}>
-              <SidebarMenuButton asChild isActive={isActive(item.url)}>
-                <NavLink to={item.url} className="hover:bg-sidebar-accent/50" activeClassName="bg-sidebar-accent text-sidebar-primary font-medium">
-                  <item.icon className="mr-2 h-4 w-4" />
-                  {!collapsed && <span>{item.title}</span>}
-                </NavLink>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          ))}
           <SidebarMenuItem>
             <SidebarMenuButton onClick={signOut} className="hover:bg-sidebar-accent/50 text-sidebar-foreground/60">
               <LogOut className="mr-2 h-4 w-4" />
