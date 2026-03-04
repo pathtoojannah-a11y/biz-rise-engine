@@ -15,6 +15,12 @@ import Leads from "./pages/Leads";
 import Pipeline from "./pages/Pipeline";
 import Automations from "./pages/Automations";
 import Reviews from "./pages/Reviews";
+import QA from "./pages/QA";
+import GoLive from "./pages/GoLive";
+import Health from "./pages/Health";
+import Billing from "./pages/Billing";
+import Pilots from "./pages/Pilots";
+import ROI from "./pages/ROI";
 import Placeholder from "./pages/Placeholder";
 import NotFound from "./pages/NotFound";
 
@@ -38,6 +44,12 @@ const App = () => (
               <Route path="/pipeline" element={<ProtectedRoute><Pipeline /></ProtectedRoute>} />
               <Route path="/automations" element={<ProtectedRoute><Automations /></ProtectedRoute>} />
               <Route path="/reviews" element={<ProtectedRoute><Reviews /></ProtectedRoute>} />
+              <Route path="/qa" element={<ProtectedRoute><QA /></ProtectedRoute>} />
+              <Route path="/go-live" element={<ProtectedRoute><GoLive /></ProtectedRoute>} />
+              <Route path="/health" element={<ProtectedRoute><Health /></ProtectedRoute>} />
+              <Route path="/billing" element={<ProtectedRoute><Billing /></ProtectedRoute>} />
+              <Route path="/pilots" element={<ProtectedRoute><Pilots /></ProtectedRoute>} />
+              <Route path="/roi" element={<ProtectedRoute><ROI /></ProtectedRoute>} />
               <Route path="/website" element={<ProtectedRoute><Placeholder title="Website" /></ProtectedRoute>} />
               <Route path="/analytics" element={<ProtectedRoute><Placeholder title="Analytics" /></ProtectedRoute>} />
               <Route path="/settings" element={<ProtectedRoute><Placeholder title="Settings" /></ProtectedRoute>} />

@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.review-request-send]
 verify_jwt = false
+
+[functions.qa-simulate]
+verify_jwt = false

@@ -432,6 +432,56 @@ export type Database = {
           },
         ]
       }
+      pilots: {
+        Row: {
+          client_name: string
+          connected_number: string | null
+          created_at: string
+          id: string
+          metrics_after: Json
+          metrics_before: Json
+          notes: string | null
+          start_date: string | null
+          status: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          client_name: string
+          connected_number?: string | null
+          created_at?: string
+          id?: string
+          metrics_after?: Json
+          metrics_before?: Json
+          notes?: string | null
+          start_date?: string | null
+          status?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          client_name?: string
+          connected_number?: string | null
+          created_at?: string
+          id?: string
+          metrics_after?: Json
+          metrics_before?: Json
+          notes?: string | null
+          start_date?: string | null
+          status?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pilots_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pipeline_stages: {
         Row: {
           created_at: string
@@ -662,6 +712,7 @@ export type Database = {
           id: string
           industry: string | null
           name: string
+          onboarding_config: Json
           slug: string
           timezone: string | null
           updated_at: string
@@ -671,6 +722,7 @@ export type Database = {
           id?: string
           industry?: string | null
           name: string
+          onboarding_config?: Json
           slug: string
           timezone?: string | null
           updated_at?: string
@@ -680,6 +732,7 @@ export type Database = {
           id?: string
           industry?: string | null
           name?: string
+          onboarding_config?: Json
           slug?: string
           timezone?: string | null
           updated_at?: string
