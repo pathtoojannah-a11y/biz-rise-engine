@@ -1,60 +1,63 @@
 
-# NexaOS — Phase 1: Database + Auth Foundation (Final)
 
-## Overview
-Build the Supabase backend foundation for NexaOS — a lead recovery and review automation platform for contractors. This phase: full schema with enums, auth, workspace membership with roles, RLS policies, and an authenticated app shell.
+# NexaOS Phase 2: Implementation Plan
 
-## 1. Enable Supabase (Lovable Cloud)
+## Migration (single SQL)
+- `ALTER PUBLICATION supabase_realtime ADD TABLE` for leads, jobs, conversations, calls
 
-## 2. Enums
-- `workspace_role`: owner, admin, staff, tech
-- `member_status`: active, invited, disabled
-- `lead_status`: new, contacted, qualified, unqualified, lost
-- `job_status`: scheduled, in_progress, completed, cancelled
-- `call_status`: missed, answered, voicemail
-- `review_status`: pending, sent, completed, declined
-- `conversation_channel`: sms, call, form, email
+## Data Hooks (7 files in `src/hooks/`)
 
-## 3. Database Schema
+| Hook | Purpose |
+|------|---------|
+| `useLeads` | Paginated query with server-side filters (status, source, location, assigned_to, date range, search via `ilike`). Uses `count: 'exact'` for correct totalCount under all filter combos. |
+| `useLeadDetail` | Single lead + conversations + calls in parallel queries |
+| `useLeadMutations` | Create (with phone normalization: strip non-digits, +1 prefix), update. Catches RLS errors → toast. |
+| `usePipelineStages` | Stages ordered by position |
+| `usePipeline` | Jobs with `select('*, leads!inner(name, phone, status, assigned_to)')`, grouped by stage_id client-side |
+| `useJobMutations` | Create job, `moveJob(id, newStageId)` with optimistic cache update + rollback on error. Server state always wins (re-fetch after mutation settles). |
+| `useRealtimeInvalidation` | Single channel per workspace, subscribes to postgres_changes on 4 tables **filtered by `filter: 'workspace_id=eq.{id}'`** — prevents cross-tenant cache pollution. Invalidates specific query keys. |
 
-### Core
-- **workspaces** — id, name, slug (UNIQUE), industry, timezone, created_at, updated_at
-- **profiles** — id (FK auth.users), full_name, avatar_url, created_at, updated_at
-- **workspace_members** — id, workspace_id, user_id, role (workspace_role), status (member_status default 'active'), joined_at, invited_by; UNIQUE(workspace_id, user_id)
-- **locations** — id, workspace_id, name, address, phone, service_area, google_review_link, created_at, updated_at
+## 5 Critical Checks — How They're Addressed
 
-### Leads & Pipeline
-- **leads** — id, workspace_id, location_id, assigned_to (FK profiles), name, phone, normalized_phone, email, source, status (lead_status), created_at, updated_at
-- **pipeline_stages** — id, workspace_id, name, position, created_at; UNIQUE(workspace_id, position), UNIQUE(workspace_id, name)
-- **jobs** — id, lead_id, workspace_id, stage_id, scheduled_at, completed_at, status (job_status), created_at, updated_at
+1. **Realtime filter safety**: Channel subscription uses `filter: 'workspace_id=eq.${workspace.id}'` so only current tenant events arrive. Query key invalidation is scoped.
 
-### Communications
-- **conversations** — id, lead_id, workspace_id, channel (conversation_channel), direction, content, created_at
-- **calls** — id, lead_id, workspace_id, direction, status (call_status), duration, twilio_sid, created_at
+2. **Optimistic DnD race conditions**: `moveJob` uses `onMutate` for instant UI, but `onSettled` always calls `invalidateQueries` to re-fetch server truth. Two concurrent moves → both settle → final server state rendered.
 
-### Reviews
-- **review_requests** — id, job_id, workspace_id, rating_value, status (review_status), google_review_url, created_at, updated_at
-- **feedback_tickets** — id, review_request_id, workspace_id, content, created_at
+3. **Staff assigned-to policy edge**: All mutations wrap errors in a check — if Supabase returns 403/RLS violation, show toast "You don't have permission to update this record" and rollback optimistic state.
 
-### Platform
-- **websites** — id, workspace_id, type (existing/generated), domain, config (jsonb), created_at, updated_at
-- **integrations** — id, workspace_id, provider, config (jsonb), status, connected_at, created_at, updated_at
-- **workflow_logs** — id, workspace_id, event_type, payload (jsonb), created_at
+4. **Pagination + totalCount**: `useLeads` passes all active filters into the same query that uses `{ count: 'exact' }`. Total pages = `Math.ceil(count / pageSize)`. Filter/search changes reset page to 1.
 
-## 4. Auth & Security
-- Email/password auth via Supabase Auth
-- Auto-create profile on signup (DB trigger)
-- `has_role(workspace_id, user_id, role)` security definer function
-- RLS on all tables scoped to workspace membership WHERE member status = 'active'
-- Permission matrix: owner (full CRUD + member mgmt), admin (CRUD, no billing), staff (read + assigned leads/jobs), tech (read-only own assignments)
+5. **Timeline ordering**: Activity tab merges conversations + calls, sorts by `new Date(item.created_at).getTime()` descending. All timestamps come from Postgres `timestamptz` — consistent UTC comparison.
 
-## 5. Seed Data
-- Default pipeline stages per workspace: New Lead → Contacted → Quoted → Booked → Completed
-- Sample workspace, location, and leads for development
+## Components (10 files in `src/components/leads/` and `src/components/pipeline/`)
 
-## 6. Authenticated App Shell
-- Login / Signup pages with NexaOS branding
-- Sidebar nav: Dashboard, Leads, Pipeline, Automations, Reviews, Website, Analytics, Settings
-- Protected routes redirecting unauthenticated users
-- Post-signup workspace creation flow (name, trade, timezone → auto-assign owner, create default stages)
-- Mobile-responsive collapsible sidebar
+**Leads:**
+- `LeadsInbox` — table with search bar (debounced 300ms), filter bar, pagination footer
+- `LeadFilters` — dropdowns for status, source, location, assigned user; date range picker
+- `LeadRow` — table row with status badge, click opens drawer
+- `LeadDetailDrawer` — Sheet from right, tabs (Activity, Conversations, Calls), inline edit form
+- `NewLeadModal` — Dialog with zod-validated form, optional "create initial job" checkbox
+
+**Pipeline:**
+- `PipelineBoard` — horizontal scroll container, renders columns
+- `PipelineColumn` — stage header + card list, drop target via HTML drag API
+- `PipelineCard` — draggable job card (lead name, status, scheduled_at, assigned user)
+- `AddJobModal` — Dialog to create job for a lead
+
+## Pages
+- `src/pages/Leads.tsx` — replaces placeholder, wraps LeadsInbox in AppLayout
+- `src/pages/Pipeline.tsx` — replaces placeholder, wraps PipelineBoard in AppLayout
+
+## Route Updates
+- Replace Placeholder imports in App.tsx for `/leads` and `/pipeline`
+
+## UX
+- Skeleton loaders for table and kanban columns
+- Status badges color-coded (new=blue, contacted=yellow, qualified=green, unqualified=gray, lost=red)
+- Mobile: inbox becomes stacked cards, pipeline horizontally scrollable with snap
+- Empty states for no leads / no jobs per column
+- NexaOS design system preserved (Space Grotesk headings, indigo/teal)
+
+## No Changes To
+- Auth, workspace bootstrap, sidebar, other pages, RLS policies, existing schema
+
