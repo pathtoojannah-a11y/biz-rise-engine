@@ -1,1 +1,10 @@
 project_id = "bushoerlhblvfejyynju"
+
+[functions.twilio-voice-status]
+verify_jwt = false
+
+[functions.twilio-inbound-sms]
+verify_jwt = false
+
+[functions.twilio-send-sms]
+verify_jwt = false
