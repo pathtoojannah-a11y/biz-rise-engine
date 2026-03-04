@@ -163,24 +163,36 @@ export type Database = {
       }
       feedback_tickets: {
         Row: {
+          assigned_to: string | null
           content: string
           created_at: string
           id: string
+          priority: Database["public"]["Enums"]["ticket_priority"]
+          resolved_at: string | null
           review_request_id: string
+          status: Database["public"]["Enums"]["ticket_status"]
           workspace_id: string
         }
         Insert: {
+          assigned_to?: string | null
           content: string
           created_at?: string
           id?: string
+          priority?: Database["public"]["Enums"]["ticket_priority"]
+          resolved_at?: string | null
           review_request_id: string
+          status?: Database["public"]["Enums"]["ticket_status"]
           workspace_id: string
         }
         Update: {
+          assigned_to?: string | null
           content?: string
           created_at?: string
           id?: string
+          priority?: Database["public"]["Enums"]["ticket_priority"]
+          resolved_at?: string | null
           review_request_id?: string
+          status?: Database["public"]["Enums"]["ticket_status"]
           workspace_id?: string
         }
         Relationships: [
@@ -479,30 +491,42 @@ export type Database = {
       review_requests: {
         Row: {
           created_at: string
+          followup_count: number
           google_review_url: string | null
           id: string
           job_id: string
+          outcome: Database["public"]["Enums"]["review_outcome"]
           rating_value: number | null
+          responded_at: string | null
+          sent_at: string | null
           status: Database["public"]["Enums"]["review_status"]
           updated_at: string
           workspace_id: string
         }
         Insert: {
           created_at?: string
+          followup_count?: number
           google_review_url?: string | null
           id?: string
           job_id: string
+          outcome?: Database["public"]["Enums"]["review_outcome"]
           rating_value?: number | null
+          responded_at?: string | null
+          sent_at?: string | null
           status?: Database["public"]["Enums"]["review_status"]
           updated_at?: string
           workspace_id: string
         }
         Update: {
           created_at?: string
+          followup_count?: number
           google_review_url?: string | null
           id?: string
           job_id?: string
+          outcome?: Database["public"]["Enums"]["review_outcome"]
           rating_value?: number | null
+          responded_at?: string | null
+          sent_at?: string | null
           status?: Database["public"]["Enums"]["review_status"]
           updated_at?: string
           workspace_id?: string
@@ -690,7 +714,14 @@ export type Database = {
       job_status: "scheduled" | "in_progress" | "completed" | "cancelled"
       lead_status: "new" | "contacted" | "qualified" | "unqualified" | "lost"
       member_status: "active" | "invited" | "disabled"
+      review_outcome:
+        | "pending"
+        | "public_redirected"
+        | "private_recovery"
+        | "no_response"
       review_status: "pending" | "sent" | "completed" | "declined"
+      ticket_priority: "low" | "medium" | "high"
+      ticket_status: "open" | "in_review" | "resolved"
       workspace_role: "owner" | "admin" | "staff" | "tech"
     }
     CompositeTypes: {
@@ -824,7 +855,15 @@ export const Constants = {
       job_status: ["scheduled", "in_progress", "completed", "cancelled"],
       lead_status: ["new", "contacted", "qualified", "unqualified", "lost"],
       member_status: ["active", "invited", "disabled"],
+      review_outcome: [
+        "pending",
+        "public_redirected",
+        "private_recovery",
+        "no_response",
+      ],
       review_status: ["pending", "sent", "completed", "declined"],
+      ticket_priority: ["low", "medium", "high"],
+      ticket_status: ["open", "in_review", "resolved"],
       workspace_role: ["owner", "admin", "staff", "tech"],
     },
   },

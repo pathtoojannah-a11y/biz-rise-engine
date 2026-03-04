@@ -6,25 +6,16 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type",
 };
 
-// Twilio signature validation (HMAC-SHA1)
 async function validateTwilioSignature(
-  authToken: string,
-  signature: string,
-  url: string,
-  params: Record<string, string>
+  authToken: string, signature: string, url: string, params: Record<string, string>
 ): Promise<boolean> {
   const sortedKeys = Object.keys(params).sort();
   let dataStr = url;
-  for (const key of sortedKeys) {
-    dataStr += key + params[key];
-  }
+  for (const key of sortedKeys) dataStr += key + params[key];
   const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw", encoder.encode(authToken), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]
-  );
+  const key = await crypto.subtle.importKey("raw", encoder.encode(authToken), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
   const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(dataStr));
-  const computed = btoa(String.fromCharCode(...new Uint8Array(sig)));
-  return computed === signature;
+  return btoa(String.fromCharCode(...new Uint8Array(sig))) === signature;
 }
 
 function getServiceClient() {
@@ -77,21 +68,123 @@ async function isOptedOut(supabase: any, workspaceId: string, leadId: string): P
 }
 
 const QUALIFICATION_STEPS: Record<string, { question: string; nextStep: string }> = {
-  step_1_service_type: {
-    question: "Thanks! What type of service do you need? (e.g., plumbing, HVAC, electrical, etc.)",
-    nextStep: "step_2_urgency",
-  },
-  step_2_urgency: {
-    question: "How urgent is this? Reply:\n1 - Emergency (today)\n2 - Soon (this week)\n3 - Not urgent",
-    nextStep: "step_3_zip",
-  },
-  step_3_zip: {
-    question: "Last question — what's your zip code so we can check service coverage?",
-    nextStep: "completed",
-  },
+  step_1_service_type: { question: "Thanks! What type of service do you need? (e.g., plumbing, HVAC, electrical, etc.)", nextStep: "step_2_urgency" },
+  step_2_urgency: { question: "How urgent is this? Reply:\n1 - Emergency (today)\n2 - Soon (this week)\n3 - Not urgent", nextStep: "step_3_zip" },
+  step_3_zip: { question: "Last question — what's your zip code so we can check service coverage?", nextStep: "completed" },
 };
 
 const OPT_OUT_KEYWORDS = ["stop", "unsubscribe", "cancel", "quit", "end"];
+
+// ====== REVIEW RATING HANDLER ======
+async function handleReviewRating(
+  supabase: any, config: any, workspaceId: string, leadId: string, fromNumber: string, body: string
+): Promise<boolean> {
+  // Check if there's a pending review request for this lead
+  const { data: pendingReview } = await supabase
+    .from("review_requests").select("*, jobs!inner(lead_id, workspace_id)")
+    .eq("workspace_id", workspaceId)
+    .eq("status", "sent")
+    .limit(10);
+
+  if (!pendingReview || pendingReview.length === 0) return false;
+
+  // Find the review request matching this lead
+  const review = pendingReview.find((r: any) => r.jobs?.lead_id === leadId);
+  if (!review) return false;
+
+  const rating = parseInt(body.trim(), 10);
+
+  // Non-numeric reply — prompt again
+  if (isNaN(rating) || rating < 1 || rating > 5) {
+    try {
+      await sendSms(config.account_sid, config.auth_token, config.from_number, fromNumber,
+        "Please reply with a number from 1 to 5 to rate your experience.");
+      await supabase.from("conversations").insert({
+        workspace_id: workspaceId, lead_id: leadId, channel: "sms", direction: "outbound",
+        content: "Please reply with a number from 1 to 5 to rate your experience.",
+      });
+    } catch (_) { /* best effort */ }
+    return true; // handled — don't fall through to qualification
+  }
+
+  // Valid rating
+  const now = new Date().toISOString();
+
+  if (rating >= 4) {
+    // Get Google review link
+    const { data: job } = await supabase
+      .from("jobs").select("lead_id, workspace_id, leads!inner(location_id)")
+      .eq("id", review.job_id).single();
+
+    let googleLink = "";
+    if (job?.leads?.location_id) {
+      const { data: loc } = await supabase
+        .from("locations").select("google_review_link").eq("id", job.leads.location_id).single();
+      googleLink = loc?.google_review_link || "";
+    }
+    if (!googleLink) {
+      // Fallback: workspace-level link from any location
+      const { data: locs } = await supabase
+        .from("locations").select("google_review_link")
+        .eq("workspace_id", workspaceId).not("google_review_link", "is", null).limit(1);
+      googleLink = locs?.[0]?.google_review_link || "";
+    }
+
+    await supabase.from("review_requests").update({
+      rating_value: rating, status: "completed", outcome: "public_redirected",
+      responded_at: now,
+    }).eq("id", review.id);
+
+    if (googleLink) {
+      const msg = `Thank you for the ${rating}-star rating! 🎉 We'd love if you could share your experience:\n${googleLink}`;
+      try {
+        await sendSms(config.account_sid, config.auth_token, config.from_number, fromNumber, msg);
+        await supabase.from("conversations").insert({
+          workspace_id: workspaceId, lead_id: leadId, channel: "sms", direction: "outbound", content: msg,
+        });
+        await logEvent(supabase, workspaceId, "google_redirect_sent", { lead_id: leadId, review_request_id: review.id, rating });
+      } catch (err: any) {
+        await logEvent(supabase, workspaceId, "review_error", { step: "google_redirect_sms", error: err.message });
+      }
+    }
+  } else {
+    // 1-3: private recovery
+    await supabase.from("review_requests").update({
+      rating_value: rating, status: "completed", outcome: "private_recovery",
+      responded_at: now,
+    }).eq("id", review.id);
+
+    // Create feedback ticket (idempotent — check existing)
+    const { data: existingTicket } = await supabase
+      .from("feedback_tickets").select("id")
+      .eq("review_request_id", review.id).limit(1);
+
+    if (!existingTicket || existingTicket.length === 0) {
+      const priority = rating === 1 ? "high" : "medium";
+      await supabase.from("feedback_tickets").insert({
+        workspace_id: workspaceId, review_request_id: review.id,
+        content: `Rating: ${rating}/5. Customer feedback pending.`, status: "open", priority,
+      });
+      await logEvent(supabase, workspaceId, "private_ticket_created", {
+        lead_id: leadId, review_request_id: review.id, rating, priority,
+      });
+    }
+
+    const recoveryMsg = "Thank you for your feedback. We're sorry to hear about your experience. A manager will be in touch shortly to make things right.";
+    try {
+      await sendSms(config.account_sid, config.auth_token, config.from_number, fromNumber, recoveryMsg);
+      await supabase.from("conversations").insert({
+        workspace_id: workspaceId, lead_id: leadId, channel: "sms", direction: "outbound", content: recoveryMsg,
+      });
+    } catch (_) { /* best effort */ }
+  }
+
+  await logEvent(supabase, workspaceId, "rating_received", {
+    lead_id: leadId, review_request_id: review.id, rating, outcome: rating >= 4 ? "public_redirected" : "private_recovery",
+  });
+
+  return true;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -109,7 +202,6 @@ Deno.serve(async (req) => {
     const toNumber = params.To || "";
     const body = (params.Body || "").trim();
 
-    // Resolve workspace
     const ws = await resolveWorkspace(supabase, toNumber);
     if (!ws) {
       console.log("Unknown inbound SMS to:", toNumber);
@@ -121,21 +213,17 @@ Deno.serve(async (req) => {
 
     const { workspace_id, config } = ws;
 
-    // ===== TWILIO SIGNATURE VALIDATION =====
+    // Twilio signature validation
     const twilioSignature = req.headers.get("X-Twilio-Signature") || "";
     if (config.auth_token && twilioSignature) {
       const webhookUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/twilio-inbound-sms`;
       const valid = await validateTwilioSignature(config.auth_token, twilioSignature, webhookUrl, params);
       if (!valid) {
-        await logEvent(supabase, workspace_id, "webhook_rejected", {
-          reason: "invalid_signature", message_sid: messageSid,
-        });
+        await logEvent(supabase, workspace_id, "webhook_rejected", { reason: "invalid_signature", message_sid: messageSid });
         return new Response("<Response/>", { status: 403, headers: { "Content-Type": "text/xml" } });
       }
     } else if (config.auth_token && !twilioSignature) {
-      await logEvent(supabase, workspace_id, "webhook_rejected", {
-        reason: "missing_signature", message_sid: messageSid,
-      });
+      await logEvent(supabase, workspace_id, "webhook_rejected", { reason: "missing_signature", message_sid: messageSid });
       return new Response("<Response/>", { status: 403, headers: { "Content-Type": "text/xml" } });
     }
 
@@ -161,7 +249,7 @@ Deno.serve(async (req) => {
       await logEvent(supabase, workspace_id, "lead_upserted", { lead_id: leadId, phone: fromNumber });
     }
 
-    // Dedupe by message SID — check recent conversations with same content from same lead
+    // Dedupe by message SID
     if (messageSid) {
       const { data: recent } = await supabase
         .from("conversations").select("id")
@@ -186,16 +274,20 @@ Deno.serve(async (req) => {
       return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    // Check if lead previously opted out — block all outbound
     const optedOut = await isOptedOut(supabase, workspace_id, leadId);
     if (optedOut) {
       await logEvent(supabase, workspace_id, "sms_blocked_opt_out", { lead_id: leadId });
       return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    // Qualification flow
-    const qualificationEnabled = config.qualification_flow !== false;
+    // ====== TRY REVIEW RATING FIRST ======
+    if (/^\d$/.test(body.trim()) || /^[1-5]$/.test(body.trim())) {
+      const handled = await handleReviewRating(supabase, config, workspace_id, leadId, fromNumber, body);
+      if (handled) return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
+    }
 
+    // ====== QUALIFICATION FLOW ======
+    const qualificationEnabled = config.qualification_flow !== false;
     if (qualificationEnabled) {
       const { data: session } = await supabase
         .from("automation_sessions").select("*")
@@ -211,34 +303,26 @@ Deno.serve(async (req) => {
           const updatedAnswers = { ...((session.answers as any) || {}), [answerKey]: body };
 
           if (stepConfig.nextStep === "completed") {
-            // Qualification complete
             await supabase.from("automation_sessions").update({
               current_step: "completed", answers: updatedAnswers, status: "completed", last_message_sid: messageSid,
             }).eq("id", session.id);
-
             await supabase.from("leads").update({ status: "qualified" }).eq("id", leadId);
 
-            // Idempotent job creation: check if job already exists for this lead in this workspace
             if (config.auto_create_job !== false) {
               const { data: existingJob } = await supabase
-                .from("jobs").select("id")
-                .eq("workspace_id", workspace_id).eq("lead_id", leadId).limit(1);
-
+                .from("jobs").select("id").eq("workspace_id", workspace_id).eq("lead_id", leadId).limit(1);
               if (!existingJob || existingJob.length === 0) {
                 const { data: firstStage } = await supabase
                   .from("pipeline_stages").select("id")
                   .eq("workspace_id", workspace_id).order("position").limit(1).single();
                 if (firstStage) {
-                  await supabase.from("jobs").insert({
-                    workspace_id, lead_id: leadId, stage_id: firstStage.id, status: "scheduled",
-                  });
+                  await supabase.from("jobs").insert({ workspace_id, lead_id: leadId, stage_id: firstStage.id, status: "scheduled" });
                 }
               }
             }
 
             let completionMsg = "Thanks! We have all the info we need. Someone will be in touch shortly.";
             if (config.booking_link) completionMsg += `\n\nBook directly here: ${config.booking_link}`;
-
             try {
               await sendSms(config.account_sid, config.auth_token, config.from_number, fromNumber, completionMsg);
               await supabase.from("conversations").insert({
@@ -247,7 +331,6 @@ Deno.serve(async (req) => {
             } catch (err: any) {
               await logEvent(supabase, workspace_id, "error", { step: "completion_sms", error: err.message });
             }
-
             await logEvent(supabase, workspace_id, "qualification_completed", { lead_id: leadId, answers: updatedAnswers });
           } else {
             await supabase.from("automation_sessions").update({
@@ -265,7 +348,6 @@ Deno.serve(async (req) => {
                 await logEvent(supabase, workspace_id, "error", { step: "qualification_sms", error: err.message });
               }
             }
-
             await supabase.from("leads").update({ status: "contacted" }).eq("id", leadId);
             await logEvent(supabase, workspace_id, "qualification_step", {
               lead_id: leadId, from_step: currentStep, to_step: stepConfig.nextStep, answer: body,
