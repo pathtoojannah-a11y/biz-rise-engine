@@ -73,22 +73,26 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
     if (wsError) return { error: wsError as unknown as Error };
 
+    // Idempotent: upsert membership (unique constraint on workspace_id, user_id)
     const { error: memberError } = await supabase
       .from('workspace_members')
-      .insert({
+      .upsert({
         workspace_id: ws.id,
         user_id: user.id,
         role: 'owner' as const,
         status: 'active' as const,
-      });
+      }, { onConflict: 'workspace_id,user_id' });
 
     if (memberError) return { error: memberError as unknown as Error };
 
-    // Create default pipeline stages
+    // Idempotent: insert default pipeline stages (unique on workspace_id,name and workspace_id,position)
     const stages = ['New Lead', 'Contacted', 'Quoted', 'Booked', 'Completed'];
-    await supabase.from('pipeline_stages').insert(
-      stages.map((name, i) => ({ workspace_id: ws.id, name, position: i + 1 }))
-    );
+    for (let i = 0; i < stages.length; i++) {
+      await supabase.from('pipeline_stages').upsert(
+        { workspace_id: ws.id, name: stages[i], position: i + 1 },
+        { onConflict: 'workspace_id,name' }
+      );
+    }
 
     setWorkspace(ws);
     return { error: null };
