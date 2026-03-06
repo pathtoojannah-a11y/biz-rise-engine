@@ -6,25 +6,22 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// Twilio signature validation (HMAC-SHA1)
 async function validateTwilioSignature(
   authToken: string,
   signature: string,
   url: string,
-  params: Record<string, string>
+  params: Record<string, string>,
 ): Promise<boolean> {
   const sortedKeys = Object.keys(params).sort();
   let dataStr = url;
-  for (const key of sortedKeys) {
-    dataStr += key + params[key];
-  }
+  for (const key of sortedKeys) dataStr += key + params[key];
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",
     encoder.encode(authToken),
     { name: "HMAC", hash: "SHA-1" },
     false,
-    ["sign"]
+    ["sign"],
   );
   const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(dataStr));
   const computed = btoa(String.fromCharCode(...new Uint8Array(sig)));
@@ -34,8 +31,16 @@ async function validateTwilioSignature(
 function getServiceClient() {
   return createClient(
     Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
+}
+
+function getTwilioMasterAccountSid() {
+  return Deno.env.get("TWILIO_MASTER_ACCOUNT_SID") || "";
+}
+
+function getTwilioMasterAuthToken() {
+  return Deno.env.get("TWILIO_MASTER_AUTH_TOKEN") || "";
 }
 
 async function resolveWorkspace(supabase: any, toNumber: string) {
@@ -43,15 +48,21 @@ async function resolveWorkspace(supabase: any, toNumber: string) {
   const variants = [toNumber, `+${normalized}`, `+1${normalized}`, normalized];
   const { data: integrations } = await supabase
     .from("integrations")
-    .select("workspace_id, config")
+    .select("workspace_id, config, status")
     .eq("provider", "twilio")
-    .eq("status", "connected");
+    .in("status", ["provisioned", "connected"]);
   if (!integrations) return null;
   for (const int of integrations) {
     const cfg = int.config as any;
     if (!cfg?.from_number) continue;
     const cfgNorm = cfg.from_number.replace(/\D/g, "");
-    if (variants.includes(cfg.from_number) || variants.includes(cfgNorm) || normalized === cfgNorm || normalized.endsWith(cfgNorm) || cfgNorm.endsWith(normalized)) {
+    if (
+      variants.includes(cfg.from_number) ||
+      variants.includes(cfgNorm) ||
+      normalized === cfgNorm ||
+      normalized.endsWith(cfgNorm) ||
+      cfgNorm.endsWith(normalized)
+    ) {
       return { workspace_id: int.workspace_id, config: cfg };
     }
   }
@@ -72,17 +83,26 @@ async function logEvent(supabase: any, workspaceId: string, eventType: string, p
 async function upsertLeadByPhone(supabase: any, workspaceId: string, phone: string, callerName?: string) {
   const normalized = normalizePhone(phone);
   const { data: existing } = await supabase
-    .from("leads").select("id").eq("workspace_id", workspaceId).eq("normalized_phone", normalized).limit(1);
+    .from("leads")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("normalized_phone", normalized)
+    .limit(1);
   if (existing && existing.length > 0) return existing[0];
   const { data: newLead, error } = await supabase
     .from("leads")
     .insert({ workspace_id: workspaceId, name: callerName || phone, phone, normalized_phone: normalized, source: "phone", status: "new" })
-    .select("id").single();
+    .select("id")
+    .single();
   if (error) throw error;
   return newLead;
 }
 
-async function sendSms(accountSid: string, authToken: string, from: string, to: string, body: string) {
+async function sendSms(from: string, to: string, body: string) {
+  const accountSid = getTwilioMasterAccountSid();
+  const authToken = getTwilioMasterAuthToken();
+  if (!accountSid || !authToken) throw new Error("Missing Twilio master credentials");
+
   const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
   const resp = await fetch(url, {
     method: "POST",
@@ -94,7 +114,6 @@ async function sendSms(accountSid: string, authToken: string, from: string, to: 
   return result;
 }
 
-// Check if lead has opted out
 async function isOptedOut(supabase: any, workspaceId: string, leadId: string): Promise<boolean> {
   const { data } = await supabase
     .from("automation_sessions")
@@ -114,12 +133,22 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
+  const mode = new URL(req.url).searchParams.get("mode");
+  if (mode === "answer") {
+    return new Response(
+      "<Response><Say voice=\"alice\">Thanks for calling. We will text you right back.</Say><Hangup/></Response>",
+      { headers: { ...corsHeaders, "Content-Type": "text/xml" } },
+    );
+  }
+
   const supabase = getServiceClient();
 
   try {
     const formData = await req.formData();
     const params: Record<string, string> = {};
-    formData.forEach((val, key) => { params[key] = val.toString(); });
+    formData.forEach((val, key) => {
+      params[key] = val.toString();
+    });
 
     const callStatus = params.CallStatus;
     const callSid = params.CallSid;
@@ -128,101 +157,171 @@ Deno.serve(async (req) => {
     const duration = parseInt(params.CallDuration || params.Duration || "0", 10);
     const callerName = params.CallerName || "";
 
-    // Resolve workspace FIRST (needed for signature validation)
     const ws = await resolveWorkspace(supabase, calledNumber);
     if (!ws) {
       console.log("Unknown number:", calledNumber);
-      // Log to a nil workspace for observability
       await logEvent(supabase, "00000000-0000-0000-0000-000000000000", "webhook_rejected", {
-        reason: "unknown_number", called: calledNumber,
+        reason: "unknown_number",
+        called: calledNumber,
       });
       return new Response("<Response/>", { headers: { ...corsHeaders, "Content-Type": "text/xml" } });
     }
 
     const { workspace_id, config } = ws;
 
-    // ===== TWILIO SIGNATURE VALIDATION =====
     const twilioSignature = req.headers.get("X-Twilio-Signature") || "";
-    if (config.auth_token && twilioSignature) {
+    const twilioAuthToken = getTwilioMasterAuthToken();
+    if (twilioAuthToken && twilioSignature) {
       const webhookUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/twilio-voice-status`;
-      const valid = await validateTwilioSignature(config.auth_token, twilioSignature, webhookUrl, params);
+      const valid = await validateTwilioSignature(twilioAuthToken, twilioSignature, webhookUrl, params);
       if (!valid) {
         await logEvent(supabase, workspace_id, "webhook_rejected", {
-          reason: "invalid_signature", call_sid: callSid,
+          reason: "invalid_signature",
+          call_sid: callSid,
         });
         return new Response("<Response/>", { status: 403, headers: { ...corsHeaders, "Content-Type": "text/xml" } });
       }
-    } else if (config.auth_token && !twilioSignature) {
-      // Signature header missing — reject in production
+    } else if (twilioAuthToken && !twilioSignature) {
       await logEvent(supabase, workspace_id, "webhook_rejected", {
-        reason: "missing_signature", call_sid: callSid,
+        reason: "missing_signature",
+        call_sid: callSid,
       });
       return new Response("<Response/>", { status: 403, headers: { ...corsHeaders, "Content-Type": "text/xml" } });
     }
 
     await logEvent(supabase, workspace_id, "call_received", {
-      call_sid: callSid, status: callStatus, from: callerNumber, to: calledNumber, duration,
+      call_sid: callSid,
+      status: callStatus,
+      from: callerNumber,
+      to: calledNumber,
+      duration,
     });
 
-    // Dedupe by twilio_sid — idempotent on retries
     if (callSid) {
       const { data: existingCall } = await supabase
-        .from("calls").select("id").eq("twilio_sid", callSid).limit(1);
+        .from("calls")
+        .select("id")
+        .eq("twilio_sid", callSid)
+        .limit(1);
       if (existingCall && existingCall.length > 0) {
         return new Response("<Response/>", { headers: { ...corsHeaders, "Content-Type": "text/xml" } });
       }
     }
 
-    // Upsert lead
     const lead = await upsertLeadByPhone(supabase, workspace_id, callerNumber, callerName);
     await logEvent(supabase, workspace_id, "lead_upserted", { lead_id: lead.id, phone: callerNumber });
 
-    // Create call record
     const isMissed = ["no-answer", "busy", "failed", "canceled"].includes(callStatus);
     const callStatusEnum = isMissed ? "missed" : callStatus === "voicemail" ? "voicemail" : "answered";
 
     await supabase.from("calls").insert({
-      workspace_id, lead_id: lead.id, direction: "inbound",
-      status: callStatusEnum, duration: duration || 0, twilio_sid: callSid,
+      workspace_id,
+      lead_id: lead.id,
+      direction: "inbound",
+      status: callStatusEnum,
+      duration: duration || 0,
+      twilio_sid: callSid,
     });
 
-    // Missed call automation
+    const { data: workspace } = await supabase
+      .from("workspaces")
+      .select("name, onboarding_config")
+      .eq("id", workspace_id)
+      .single();
+
+    const onboardingConfig =
+      workspace?.onboarding_config &&
+      typeof workspace.onboarding_config === "object" &&
+      !Array.isArray(workspace.onboarding_config)
+        ? workspace.onboarding_config
+        : {};
+    const checklist =
+      onboardingConfig.checklist &&
+      typeof onboardingConfig.checklist === "object" &&
+      !Array.isArray(onboardingConfig.checklist)
+        ? onboardingConfig.checklist
+        : {};
+
+    if (!onboardingConfig.test_call_verified && onboardingConfig.test_call_started_at) {
+      await supabase
+        .from("workspaces")
+        .update({
+          onboarding_config: {
+            ...onboardingConfig,
+            forwarding_pending: false,
+            test_call_verified: true,
+            test_call_verified_at: new Date().toISOString(),
+            checklist: {
+              ...checklist,
+              twilio_connected: true,
+            },
+          } as any,
+        })
+        .eq("id", workspace_id);
+
+      await supabase
+        .from("integrations")
+        .update({ status: "connected", connected_at: new Date().toISOString() })
+        .eq("workspace_id", workspace_id)
+        .eq("provider", "twilio");
+
+      await supabase
+        .from("provisioned_numbers")
+        .update({ status: "active" })
+        .eq("workspace_id", workspace_id);
+
+      await logEvent(supabase, workspace_id, "forwarding_test_verified", {
+        call_sid: callSid,
+        lead_id: lead.id,
+      });
+    }
+
     if (isMissed || callStatus === "voicemail") {
       const automationEnabled = config.missed_call_sms !== false;
 
-      if (automationEnabled && config.account_sid && config.auth_token && config.from_number) {
-        // Check opt-out before sending
+      if (automationEnabled && config.from_number) {
         const optedOut = await isOptedOut(supabase, workspace_id, lead.id);
         if (optedOut) {
           await logEvent(supabase, workspace_id, "sms_blocked_opt_out", { lead_id: lead.id });
           return new Response("<Response/>", { headers: { ...corsHeaders, "Content-Type": "text/xml" } });
         }
 
-        const { data: workspace } = await supabase
-          .from("workspaces").select("name").eq("id", workspace_id).single();
-
-        const template = config.missed_call_template ||
+        const template =
+          config.missed_call_template ||
           `Sorry we missed your call to ${workspace?.name || "us"}. What service do you need help with?`;
 
         try {
-          const smsResult = await sendSms(config.account_sid, config.auth_token, config.from_number, callerNumber, template);
+          const smsResult = await sendSms(config.from_number, callerNumber, template);
 
           await supabase.from("conversations").insert({
-            workspace_id, lead_id: lead.id, channel: "sms", direction: "outbound", content: template,
+            workspace_id,
+            lead_id: lead.id,
+            channel: "sms",
+            direction: "outbound",
+            content: template,
           });
 
           await supabase.from("automation_sessions").upsert({
-            workspace_id, lead_id: lead.id, type: "qualification",
-            current_step: "step_1_service_type", answers: {}, status: "active",
+            workspace_id,
+            lead_id: lead.id,
+            type: "qualification",
+            current_step: "step_1_service_type",
+            answers: {},
+            status: "active",
             last_message_sid: smsResult.sid,
           }, { onConflict: "workspace_id,lead_id,type" });
 
           await logEvent(supabase, workspace_id, "sms_sent", {
-            lead_id: lead.id, to: callerNumber, message_sid: smsResult.sid, template: "missed_call",
+            lead_id: lead.id,
+            to: callerNumber,
+            message_sid: smsResult.sid,
+            template: "missed_call",
           });
         } catch (smsErr: any) {
           await logEvent(supabase, workspace_id, "error", {
-            step: "missed_call_sms", lead_id: lead.id, error: smsErr.message,
+            step: "missed_call_sms",
+            lead_id: lead.id,
+            error: smsErr.message,
           });
         }
       }

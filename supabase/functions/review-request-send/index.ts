@@ -33,13 +33,11 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Missing job_id or workspace_id" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Verify membership
     const { data: membership } = await supabase.from("workspace_members").select("role").eq("workspace_id", workspace_id).eq("user_id", userId).eq("status", "active").single();
     if (!membership) {
       return new Response(JSON.stringify({ error: "Not a member" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Idempotent: check existing review request
     const { data: existing } = await supabase.from("review_requests").select("id").eq("job_id", job_id).limit(1);
     if (existing && existing.length > 0) {
       return new Response(JSON.stringify({ success: true, review_request_id: existing[0].id, already_exists: true }), {
@@ -47,7 +45,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Get job + lead + workspace info
     const { data: job } = await supabase.from("jobs").select("*, leads!inner(id, phone, normalized_phone, name, location_id)").eq("id", job_id).single();
     if (!job) {
       return new Response(JSON.stringify({ error: "Job not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -60,31 +57,30 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Twilio not configured" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    const accountSid = Deno.env.get("TWILIO_MASTER_ACCOUNT_SID");
+    const authToken = Deno.env.get("TWILIO_MASTER_AUTH_TOKEN");
     const cfg = integration.config as any;
     const leadPhone = job.leads.phone;
-    if (!leadPhone || !cfg.account_sid || !cfg.auth_token || !cfg.from_number) {
+    if (!leadPhone || !accountSid || !authToken || !cfg.from_number) {
       return new Response(JSON.stringify({ error: "Missing phone or Twilio config" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Create review request
     const now = new Date().toISOString();
     const { data: rr, error: rrErr } = await supabase.from("review_requests").insert({
       workspace_id, job_id, status: "sent", outcome: "pending", sent_at: now, followup_count: 0,
     }).select("id").single();
     if (rrErr) throw rrErr;
 
-    // Send SMS
     const msg = cfg.review_template || `How was your experience with ${ws?.name || "us"}? Reply 1-5.`;
-    const url = `https://api.twilio.com/2010-04-01/Accounts/${cfg.account_sid}/Messages.json`;
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
     const resp = await fetch(url, {
       method: "POST",
-      headers: { Authorization: `Basic ${btoa(`${cfg.account_sid}:${cfg.auth_token}`)}`, "Content-Type": "application/x-www-form-urlencoded" },
+      headers: { Authorization: `Basic ${btoa(`${accountSid}:${authToken}`)}`, "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ From: cfg.from_number, To: leadPhone, Body: msg }),
     });
     const result = await resp.json();
     if (!resp.ok) throw new Error(result.message || "Twilio send failed");
 
-    // Log conversation + event
     await supabase.from("conversations").insert({
       workspace_id, lead_id: job.leads.id, channel: "sms", direction: "outbound", content: msg,
     });

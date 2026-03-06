@@ -514,6 +514,50 @@ export type Database = {
           },
         ]
       }
+      provisioned_numbers: {
+        Row: {
+          area_code: string | null
+          created_at: string
+          friendly_name: string | null
+          id: string
+          phone_number: string
+          provisioned_at: string | null
+          status: string
+          twilio_sid: string
+          workspace_id: string | null
+        }
+        Insert: {
+          area_code?: string | null
+          created_at?: string
+          friendly_name?: string | null
+          id?: string
+          phone_number: string
+          provisioned_at?: string | null
+          status?: string
+          twilio_sid: string
+          workspace_id?: string | null
+        }
+        Update: {
+          area_code?: string | null
+          created_at?: string
+          friendly_name?: string | null
+          id?: string
+          phone_number?: string
+          provisioned_at?: string | null
+          status?: string
+          twilio_sid?: string
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provisioned_numbers_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -708,6 +752,7 @@ export type Database = {
       }
       workspaces: {
         Row: {
+          business_zip: string | null
           created_at: string
           id: string
           industry: string | null
@@ -718,6 +763,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          business_zip?: string | null
           created_at?: string
           id?: string
           industry?: string | null
@@ -728,6 +774,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          business_zip?: string | null
           created_at?: string
           id?: string
           industry?: string | null

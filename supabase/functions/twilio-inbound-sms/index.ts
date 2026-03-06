@@ -7,7 +7,10 @@ const corsHeaders = {
 };
 
 async function validateTwilioSignature(
-  authToken: string, signature: string, url: string, params: Record<string, string>
+  authToken: string,
+  signature: string,
+  url: string,
+  params: Record<string, string>,
 ): Promise<boolean> {
   const sortedKeys = Object.keys(params).sort();
   let dataStr = url;
@@ -22,6 +25,14 @@ function getServiceClient() {
   return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 }
 
+function getTwilioMasterAccountSid() {
+  return Deno.env.get("TWILIO_MASTER_ACCOUNT_SID") || "";
+}
+
+function getTwilioMasterAuthToken() {
+  return Deno.env.get("TWILIO_MASTER_AUTH_TOKEN") || "";
+}
+
 function normalizePhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
   if (digits.length === 10) return "+1" + digits;
@@ -32,14 +43,18 @@ function normalizePhone(phone: string): string {
 async function resolveWorkspace(supabase: any, toNumber: string) {
   const normalized = toNumber.replace(/\D/g, "");
   const { data: integrations } = await supabase
-    .from("integrations").select("workspace_id, config").eq("provider", "twilio").eq("status", "connected");
+    .from("integrations")
+    .select("workspace_id, config, status")
+    .eq("provider", "twilio")
+    .in("status", ["provisioned", "connected"]);
   if (!integrations) return null;
   for (const int of integrations) {
     const cfg = int.config as any;
     if (!cfg?.from_number) continue;
     const cfgNorm = cfg.from_number.replace(/\D/g, "");
-    if (normalized === cfgNorm || normalized.endsWith(cfgNorm) || cfgNorm.endsWith(normalized))
+    if (normalized === cfgNorm || normalized.endsWith(cfgNorm) || cfgNorm.endsWith(normalized)) {
       return { workspace_id: int.workspace_id, config: cfg };
+    }
   }
   return null;
 }
@@ -48,7 +63,11 @@ async function logEvent(supabase: any, workspaceId: string, eventType: string, p
   await supabase.from("workflow_logs").insert({ workspace_id: workspaceId, event_type: eventType, payload });
 }
 
-async function sendSms(accountSid: string, authToken: string, from: string, to: string, body: string) {
+async function sendSms(from: string, to: string, body: string) {
+  const accountSid = getTwilioMasterAccountSid();
+  const authToken = getTwilioMasterAuthToken();
+  if (!accountSid || !authToken) throw new Error("Missing Twilio master credentials");
+
   const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
   const resp = await fetch(url, {
     method: "POST",
@@ -62,85 +81,110 @@ async function sendSms(accountSid: string, authToken: string, from: string, to: 
 
 async function isOptedOut(supabase: any, workspaceId: string, leadId: string): Promise<boolean> {
   const { data } = await supabase
-    .from("automation_sessions").select("id")
-    .eq("workspace_id", workspaceId).eq("lead_id", leadId).eq("status", "opted_out").limit(1);
+    .from("automation_sessions")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("lead_id", leadId)
+    .eq("status", "opted_out")
+    .limit(1);
   return !!(data && data.length > 0);
 }
 
 const QUALIFICATION_STEPS: Record<string, { question: string; nextStep: string }> = {
-  step_1_service_type: { question: "Thanks! What type of service do you need? (e.g., plumbing, HVAC, electrical, etc.)", nextStep: "step_2_urgency" },
+  step_1_service_type: { question: "Thanks! What type of service do you need? (for example plumbing, HVAC, electrical, and so on)", nextStep: "step_2_urgency" },
   step_2_urgency: { question: "How urgent is this? Reply:\n1 - Emergency (today)\n2 - Soon (this week)\n3 - Not urgent", nextStep: "step_3_zip" },
-  step_3_zip: { question: "Last question — what's your zip code so we can check service coverage?", nextStep: "completed" },
+  step_3_zip: { question: "Last question - what is your zip code so we can check service coverage?", nextStep: "completed" },
 };
 
 const OPT_OUT_KEYWORDS = ["stop", "unsubscribe", "cancel", "quit", "end"];
 
-// ====== REVIEW RATING HANDLER ======
 async function handleReviewRating(
-  supabase: any, config: any, workspaceId: string, leadId: string, fromNumber: string, body: string
+  supabase: any,
+  config: any,
+  workspaceId: string,
+  leadId: string,
+  fromNumber: string,
+  body: string,
 ): Promise<boolean> {
-  // Check if there's a pending review request for this lead
   const { data: pendingReview } = await supabase
-    .from("review_requests").select("*, jobs!inner(lead_id, workspace_id)")
+    .from("review_requests")
+    .select("*, jobs!inner(lead_id, workspace_id)")
     .eq("workspace_id", workspaceId)
     .eq("status", "sent")
     .limit(10);
 
   if (!pendingReview || pendingReview.length === 0) return false;
 
-  // Find the review request matching this lead
-  const review = pendingReview.find((r: any) => r.jobs?.lead_id === leadId);
+  const review = pendingReview.find((row: any) => row.jobs?.lead_id === leadId);
   if (!review) return false;
 
   const rating = parseInt(body.trim(), 10);
 
-  // Non-numeric reply — prompt again
   if (isNaN(rating) || rating < 1 || rating > 5) {
     try {
-      await sendSms(config.account_sid, config.auth_token, config.from_number, fromNumber,
-        "Please reply with a number from 1 to 5 to rate your experience.");
+      await sendSms(
+        config.from_number,
+        fromNumber,
+        "Please reply with a number from 1 to 5 to rate your experience.",
+      );
       await supabase.from("conversations").insert({
-        workspace_id: workspaceId, lead_id: leadId, channel: "sms", direction: "outbound",
+        workspace_id: workspaceId,
+        lead_id: leadId,
+        channel: "sms",
+        direction: "outbound",
         content: "Please reply with a number from 1 to 5 to rate your experience.",
       });
-    } catch (_) { /* best effort */ }
-    return true; // handled — don't fall through to qualification
+    } catch (_) {
+      // Best effort only.
+    }
+    return true;
   }
 
-  // Valid rating
   const now = new Date().toISOString();
 
   if (rating >= 4) {
-    // Get Google review link
     const { data: job } = await supabase
-      .from("jobs").select("lead_id, workspace_id, leads!inner(location_id)")
-      .eq("id", review.job_id).single();
+      .from("jobs")
+      .select("lead_id, workspace_id, leads!inner(location_id)")
+      .eq("id", review.job_id)
+      .single();
 
     let googleLink = "";
     if (job?.leads?.location_id) {
       const { data: loc } = await supabase
-        .from("locations").select("google_review_link").eq("id", job.leads.location_id).single();
+        .from("locations")
+        .select("google_review_link")
+        .eq("id", job.leads.location_id)
+        .single();
       googleLink = loc?.google_review_link || "";
     }
     if (!googleLink) {
-      // Fallback: workspace-level link from any location
       const { data: locs } = await supabase
-        .from("locations").select("google_review_link")
-        .eq("workspace_id", workspaceId).not("google_review_link", "is", null).limit(1);
+        .from("locations")
+        .select("google_review_link")
+        .eq("workspace_id", workspaceId)
+        .not("google_review_link", "is", null)
+        .limit(1);
       googleLink = locs?.[0]?.google_review_link || "";
     }
 
     await supabase.from("review_requests").update({
-      rating_value: rating, status: "completed", outcome: "public_redirected",
+      rating_value: rating,
+      status: "completed",
+      outcome: "public_redirected",
       responded_at: now,
     }).eq("id", review.id);
 
     if (googleLink) {
-      const msg = `Thank you for the ${rating}-star rating! 🎉 We'd love if you could share your experience:\n${googleLink}`;
+      const msg = `Thank you for the ${rating}-star rating. We would love if you could share your experience:\n${googleLink}`;
       try {
-        await sendSms(config.account_sid, config.auth_token, config.from_number, fromNumber, msg);
+        await sendSms(config.from_number, fromNumber, msg);
         await supabase.from("conversations").insert({
-          workspace_id: workspaceId, lead_id: leadId, channel: "sms", direction: "outbound", content: msg,
+          workspace_id: workspaceId,
+          lead_id: leadId,
+          channel: "sms",
+          direction: "outbound",
+          content: msg,
         });
         await logEvent(supabase, workspaceId, "google_redirect_sent", { lead_id: leadId, review_request_id: review.id, rating });
       } catch (err: any) {
@@ -148,39 +192,56 @@ async function handleReviewRating(
       }
     }
   } else {
-    // 1-3: private recovery
     await supabase.from("review_requests").update({
-      rating_value: rating, status: "completed", outcome: "private_recovery",
+      rating_value: rating,
+      status: "completed",
+      outcome: "private_recovery",
       responded_at: now,
     }).eq("id", review.id);
 
-    // Create feedback ticket (idempotent — check existing)
     const { data: existingTicket } = await supabase
-      .from("feedback_tickets").select("id")
-      .eq("review_request_id", review.id).limit(1);
+      .from("feedback_tickets")
+      .select("id")
+      .eq("review_request_id", review.id)
+      .limit(1);
 
     if (!existingTicket || existingTicket.length === 0) {
       const priority = rating === 1 ? "high" : "medium";
       await supabase.from("feedback_tickets").insert({
-        workspace_id: workspaceId, review_request_id: review.id,
-        content: `Rating: ${rating}/5. Customer feedback pending.`, status: "open", priority,
+        workspace_id: workspaceId,
+        review_request_id: review.id,
+        content: `Rating: ${rating}/5. Customer feedback pending.`,
+        status: "open",
+        priority,
       });
       await logEvent(supabase, workspaceId, "private_ticket_created", {
-        lead_id: leadId, review_request_id: review.id, rating, priority,
+        lead_id: leadId,
+        review_request_id: review.id,
+        rating,
+        priority,
       });
     }
 
-    const recoveryMsg = "Thank you for your feedback. We're sorry to hear about your experience. A manager will be in touch shortly to make things right.";
+    const recoveryMsg = "Thank you for your feedback. We are sorry to hear about your experience. A manager will be in touch shortly to make things right.";
     try {
-      await sendSms(config.account_sid, config.auth_token, config.from_number, fromNumber, recoveryMsg);
+      await sendSms(config.from_number, fromNumber, recoveryMsg);
       await supabase.from("conversations").insert({
-        workspace_id: workspaceId, lead_id: leadId, channel: "sms", direction: "outbound", content: recoveryMsg,
+        workspace_id: workspaceId,
+        lead_id: leadId,
+        channel: "sms",
+        direction: "outbound",
+        content: recoveryMsg,
       });
-    } catch (_) { /* best effort */ }
+    } catch (_) {
+      // Best effort only.
+    }
   }
 
   await logEvent(supabase, workspaceId, "rating_received", {
-    lead_id: leadId, review_request_id: review.id, rating, outcome: rating >= 4 ? "public_redirected" : "private_recovery",
+    lead_id: leadId,
+    review_request_id: review.id,
+    rating,
+    outcome: rating >= 4 ? "public_redirected" : "private_recovery",
   });
 
   return true;
@@ -195,7 +256,9 @@ Deno.serve(async (req) => {
   try {
     const formData = await req.formData();
     const params: Record<string, string> = {};
-    formData.forEach((val, key) => { params[key] = val.toString(); });
+    formData.forEach((val, key) => {
+      params[key] = val.toString();
+    });
 
     const messageSid = params.MessageSid || params.SmsSid || "";
     const fromNumber = params.From || "";
@@ -206,35 +269,43 @@ Deno.serve(async (req) => {
     if (!ws) {
       console.log("Unknown inbound SMS to:", toNumber);
       await logEvent(supabase, "00000000-0000-0000-0000-000000000000", "webhook_rejected", {
-        reason: "unknown_sms_number", to: toNumber, from: fromNumber,
+        reason: "unknown_sms_number",
+        to: toNumber,
+        from: fromNumber,
       });
       return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
     }
 
     const { workspace_id, config } = ws;
 
-    // Twilio signature validation
     const twilioSignature = req.headers.get("X-Twilio-Signature") || "";
-    if (config.auth_token && twilioSignature) {
+    const twilioAuthToken = getTwilioMasterAuthToken();
+    if (twilioAuthToken && twilioSignature) {
       const webhookUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/twilio-inbound-sms`;
-      const valid = await validateTwilioSignature(config.auth_token, twilioSignature, webhookUrl, params);
+      const valid = await validateTwilioSignature(twilioAuthToken, twilioSignature, webhookUrl, params);
       if (!valid) {
         await logEvent(supabase, workspace_id, "webhook_rejected", { reason: "invalid_signature", message_sid: messageSid });
         return new Response("<Response/>", { status: 403, headers: { "Content-Type": "text/xml" } });
       }
-    } else if (config.auth_token && !twilioSignature) {
+    } else if (twilioAuthToken && !twilioSignature) {
       await logEvent(supabase, workspace_id, "webhook_rejected", { reason: "missing_signature", message_sid: messageSid });
       return new Response("<Response/>", { status: 403, headers: { "Content-Type": "text/xml" } });
     }
 
     await logEvent(supabase, workspace_id, "sms_received", {
-      from: fromNumber, to: toNumber, message_sid: messageSid, body_preview: body.substring(0, 100),
+      from: fromNumber,
+      to: toNumber,
+      message_sid: messageSid,
+      body_preview: body.substring(0, 100),
     });
 
-    // Find or create lead
     const normalized = normalizePhone(fromNumber);
     const { data: existingLeads } = await supabase
-      .from("leads").select("id").eq("workspace_id", workspace_id).eq("normalized_phone", normalized).limit(1);
+      .from("leads")
+      .select("id")
+      .eq("workspace_id", workspace_id)
+      .eq("normalized_phone", normalized)
+      .limit(1);
 
     let leadId: string;
     if (existingLeads && existingLeads.length > 0) {
@@ -243,33 +314,43 @@ Deno.serve(async (req) => {
       const { data: newLead, error } = await supabase
         .from("leads")
         .insert({ workspace_id, name: fromNumber, phone: fromNumber, normalized_phone: normalized, source: "sms", status: "new" })
-        .select("id").single();
+        .select("id")
+        .single();
       if (error) throw error;
       leadId = newLead.id;
       await logEvent(supabase, workspace_id, "lead_upserted", { lead_id: leadId, phone: fromNumber });
     }
 
-    // Dedupe by message SID
     if (messageSid) {
       const { data: recent } = await supabase
-        .from("conversations").select("id")
-        .eq("lead_id", leadId).eq("channel", "sms").eq("direction", "inbound").eq("content", body)
-        .gte("created_at", new Date(Date.now() - 60000).toISOString()).limit(1);
+        .from("conversations")
+        .select("id")
+        .eq("lead_id", leadId)
+        .eq("channel", "sms")
+        .eq("direction", "inbound")
+        .eq("content", body)
+        .gte("created_at", new Date(Date.now() - 60000).toISOString())
+        .limit(1);
       if (recent && recent.length > 0) {
         return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
       }
     }
 
-    // Store inbound conversation
     await supabase.from("conversations").insert({
-      workspace_id, lead_id: leadId, channel: "sms", direction: "inbound", content: body,
+      workspace_id,
+      lead_id: leadId,
+      channel: "sms",
+      direction: "inbound",
+      content: body,
     });
 
-    // Check opt-out
     if (OPT_OUT_KEYWORDS.includes(body.toLowerCase())) {
       await supabase
-        .from("automation_sessions").update({ status: "opted_out" })
-        .eq("workspace_id", workspace_id).eq("lead_id", leadId).eq("type", "qualification");
+        .from("automation_sessions")
+        .update({ status: "opted_out" })
+        .eq("workspace_id", workspace_id)
+        .eq("lead_id", leadId)
+        .eq("type", "qualification");
       await logEvent(supabase, workspace_id, "opt_out", { lead_id: leadId, message: body });
       return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
     }
@@ -280,19 +361,21 @@ Deno.serve(async (req) => {
       return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    // ====== TRY REVIEW RATING FIRST ======
     if (/^\d$/.test(body.trim()) || /^[1-5]$/.test(body.trim())) {
       const handled = await handleReviewRating(supabase, config, workspace_id, leadId, fromNumber, body);
       if (handled) return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    // ====== QUALIFICATION FLOW ======
     const qualificationEnabled = config.qualification_flow !== false;
     if (qualificationEnabled) {
       const { data: session } = await supabase
-        .from("automation_sessions").select("*")
-        .eq("workspace_id", workspace_id).eq("lead_id", leadId)
-        .eq("type", "qualification").eq("status", "active").single();
+        .from("automation_sessions")
+        .select("*")
+        .eq("workspace_id", workspace_id)
+        .eq("lead_id", leadId)
+        .eq("type", "qualification")
+        .eq("status", "active")
+        .single();
 
       if (session) {
         const currentStep = session.current_step;
@@ -304,17 +387,28 @@ Deno.serve(async (req) => {
 
           if (stepConfig.nextStep === "completed") {
             await supabase.from("automation_sessions").update({
-              current_step: "completed", answers: updatedAnswers, status: "completed", last_message_sid: messageSid,
+              current_step: "completed",
+              answers: updatedAnswers,
+              status: "completed",
+              last_message_sid: messageSid,
             }).eq("id", session.id);
             await supabase.from("leads").update({ status: "qualified" }).eq("id", leadId);
 
             if (config.auto_create_job !== false) {
               const { data: existingJob } = await supabase
-                .from("jobs").select("id").eq("workspace_id", workspace_id).eq("lead_id", leadId).limit(1);
+                .from("jobs")
+                .select("id")
+                .eq("workspace_id", workspace_id)
+                .eq("lead_id", leadId)
+                .limit(1);
               if (!existingJob || existingJob.length === 0) {
                 const { data: firstStage } = await supabase
-                  .from("pipeline_stages").select("id")
-                  .eq("workspace_id", workspace_id).order("position").limit(1).single();
+                  .from("pipeline_stages")
+                  .select("id")
+                  .eq("workspace_id", workspace_id)
+                  .order("position")
+                  .limit(1)
+                  .single();
                 if (firstStage) {
                   await supabase.from("jobs").insert({ workspace_id, lead_id: leadId, stage_id: firstStage.id, status: "scheduled" });
                 }
@@ -324,9 +418,13 @@ Deno.serve(async (req) => {
             let completionMsg = "Thanks! We have all the info we need. Someone will be in touch shortly.";
             if (config.booking_link) completionMsg += `\n\nBook directly here: ${config.booking_link}`;
             try {
-              await sendSms(config.account_sid, config.auth_token, config.from_number, fromNumber, completionMsg);
+              await sendSms(config.from_number, fromNumber, completionMsg);
               await supabase.from("conversations").insert({
-                workspace_id, lead_id: leadId, channel: "sms", direction: "outbound", content: completionMsg,
+                workspace_id,
+                lead_id: leadId,
+                channel: "sms",
+                direction: "outbound",
+                content: completionMsg,
               });
             } catch (err: any) {
               await logEvent(supabase, workspace_id, "error", { step: "completion_sms", error: err.message });
@@ -334,15 +432,21 @@ Deno.serve(async (req) => {
             await logEvent(supabase, workspace_id, "qualification_completed", { lead_id: leadId, answers: updatedAnswers });
           } else {
             await supabase.from("automation_sessions").update({
-              current_step: stepConfig.nextStep, answers: updatedAnswers, last_message_sid: messageSid,
+              current_step: stepConfig.nextStep,
+              answers: updatedAnswers,
+              last_message_sid: messageSid,
             }).eq("id", session.id);
 
-            const nextQ = QUALIFICATION_STEPS[stepConfig.nextStep];
-            if (nextQ) {
+            const nextQuestion = QUALIFICATION_STEPS[stepConfig.nextStep];
+            if (nextQuestion) {
               try {
-                await sendSms(config.account_sid, config.auth_token, config.from_number, fromNumber, nextQ.question);
+                await sendSms(config.from_number, fromNumber, nextQuestion.question);
                 await supabase.from("conversations").insert({
-                  workspace_id, lead_id: leadId, channel: "sms", direction: "outbound", content: nextQ.question,
+                  workspace_id,
+                  lead_id: leadId,
+                  channel: "sms",
+                  direction: "outbound",
+                  content: nextQuestion.question,
                 });
               } catch (err: any) {
                 await logEvent(supabase, workspace_id, "error", { step: "qualification_sms", error: err.message });
@@ -350,7 +454,10 @@ Deno.serve(async (req) => {
             }
             await supabase.from("leads").update({ status: "contacted" }).eq("id", leadId);
             await logEvent(supabase, workspace_id, "qualification_step", {
-              lead_id: leadId, from_step: currentStep, to_step: stepConfig.nextStep, answer: body,
+              lead_id: leadId,
+              from_step: currentStep,
+              to_step: stepConfig.nextStep,
+              answer: body,
             });
           }
         }

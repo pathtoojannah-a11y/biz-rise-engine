@@ -10,7 +10,7 @@ export function useLocations() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('locations')
-        .select('id, name')
+        .select('id, name, google_review_link')
         .eq('workspace_id', workspace!.id)
         .order('name');
       if (error) throw error;

@@ -18,7 +18,6 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Validate auth
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -30,7 +29,7 @@ Deno.serve(async (req) => {
   const supabaseAuth = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: authHeader } } }
+    { global: { headers: { Authorization: authHeader } } },
   );
 
   const token = authHeader.replace("Bearer ", "");
@@ -54,10 +53,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Verify user is active member of workspace
     const supabaseService = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
     const { data: membership } = await supabaseService
@@ -75,13 +73,12 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Get Twilio config
     const { data: integration } = await supabaseService
       .from("integrations")
       .select("config")
       .eq("workspace_id", workspace_id)
       .eq("provider", "twilio")
-      .eq("status", "connected")
+      .in("status", ["provisioned", "connected"])
       .single();
 
     if (!integration) {
@@ -91,20 +88,22 @@ Deno.serve(async (req) => {
       });
     }
 
+    const accountSid = Deno.env.get("TWILIO_MASTER_ACCOUNT_SID");
+    const authToken = Deno.env.get("TWILIO_MASTER_AUTH_TOKEN");
     const cfg = integration.config as any;
-    if (!cfg.account_sid || !cfg.auth_token || !cfg.from_number) {
+
+    if (!accountSid || !authToken || !cfg.from_number) {
       return new Response(JSON.stringify({ error: "Twilio configuration incomplete" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Send SMS
-    const url = `https://api.twilio.com/2010-04-01/Accounts/${cfg.account_sid}/Messages.json`;
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
     const resp = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Basic ${btoa(`${cfg.account_sid}:${cfg.auth_token}`)}`,
+        Authorization: `Basic ${btoa(`${accountSid}:${authToken}`)}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({ From: cfg.from_number, To: to, Body: message }),
@@ -115,7 +114,6 @@ Deno.serve(async (req) => {
       throw new Error(result.message || "Twilio send failed");
     }
 
-    // Log
     await supabaseService.from("workflow_logs").insert({
       workspace_id,
       event_type: "manual_sms_sent",
