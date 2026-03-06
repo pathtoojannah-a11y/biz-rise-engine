@@ -9,22 +9,9 @@ import { WorkspaceProvider } from "@/hooks/useWorkspace";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 
 const Index = lazy(() => import("./pages/Index"));
-const Pricing = lazy(() => import("./pages/Pricing"));
-const DemoBooking = lazy(() => import("./pages/DemoBooking"));
-const Trust = lazy(() => import("./pages/Trust"));
-const IndustryHVAC = lazy(() => import("./pages/IndustryHVAC"));
-const IndustryPlumbing = lazy(() => import("./pages/IndustryPlumbing"));
-const IndustryElectrical = lazy(() => import("./pages/IndustryElectrical"));
-const IndustryRoofing = lazy(() => import("./pages/IndustryRoofing"));
 const Login = lazy(() => import("./pages/Login"));
 const Signup = lazy(() => import("./pages/Signup"));
-const LegalPrivacy = lazy(() => import("./pages/LegalPrivacy"));
-const LegalTerms = lazy(() => import("./pages/LegalTerms"));
 const Setup = lazy(() => import("./pages/Setup"));
-const ProductLeadRecovery = lazy(() => import("./pages/Marketing/ProductLeadRecovery"));
-const ProductPipeline = lazy(() => import("./pages/Marketing/ProductPipeline"));
-const ProductReputation = lazy(() => import("./pages/Marketing/ProductReputation"));
-const ROICalculator = lazy(() => import("./pages/Marketing/ROICalculator"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Leads = lazy(() => import("./pages/Leads"));
 const Pipeline = lazy(() => import("./pages/Pipeline"));
@@ -58,21 +45,8 @@ const App = () => (
             <Suspense fallback={<RouteFallback />}>
               <Routes>
                 <Route path="/" element={<Index />} />
-                <Route path="/pricing" element={<Pricing />} />
-                <Route path="/demo" element={<DemoBooking />} />
-                <Route path="/trust" element={<Trust />} />
-                <Route path="/industry/hvac" element={<IndustryHVAC />} />
-                <Route path="/industry/plumbing" element={<IndustryPlumbing />} />
-                <Route path="/industry/electrical" element={<IndustryElectrical />} />
-                <Route path="/industry/roofing" element={<IndustryRoofing />} />
-                <Route path="/product/lead-recovery" element={<ProductLeadRecovery />} />
-                <Route path="/product/pipeline" element={<ProductPipeline />} />
-                <Route path="/product/reputation" element={<ProductReputation />} />
-                <Route path="/resources/roi-calculator" element={<ROICalculator />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/signup" element={<Signup />} />
-                <Route path="/legal/privacy" element={<LegalPrivacy />} />
-                <Route path="/legal/terms" element={<LegalTerms />} />
                 <Route path="/setup" element={<ProtectedRoute allowIncompleteOnboarding allowMissingWorkspace><Setup /></ProtectedRoute>} />
                 <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                 <Route path="/leads" element={<ProtectedRoute><Leads /></ProtectedRoute>} />
