@@ -14,12 +14,13 @@ interface OnboardingLayoutProps {
 export function OnboardingLayout({ title, description, currentStep, steps, children }: OnboardingLayoutProps) {
   const { signOut } = useAuth();
   const { workspace } = useWorkspace();
+  const progress = Math.round(((currentStep + 1) / steps.length) * 100);
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(145deg,#020617_10%,#0f172a_42%,#f8fafc_42%,#f8fafc_100%)]">
-      <div className="grid min-h-screen lg:grid-cols-[360px_1fr]">
-        <aside className="flex flex-col justify-between border-r border-white/10 bg-slate-950/90 px-6 py-8 text-white">
-          <div className="space-y-10">
+    <div className="min-h-screen bg-slate-100">
+      <div className="grid min-h-screen lg:grid-cols-[320px_1fr]">
+        <aside className="flex flex-col justify-between border-r border-slate-800 bg-slate-950 px-6 py-8 text-white">
+          <div className="space-y-8">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/20 text-emerald-300">
                 <Hexagon className="h-5 w-5" />
@@ -30,13 +31,22 @@ export function OnboardingLayout({ title, description, currentStep, steps, child
               </div>
             </div>
 
-            <div>
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">Activation Flow</p>
-              <h1 className="mt-4 text-3xl font-black tracking-[-0.04em]">{title}</h1>
-              <p className="mt-3 text-sm leading-7 text-slate-300">{description}</p>
+              <h1 className="mt-3 text-2xl font-black tracking-[-0.04em]">{title}</h1>
+              <p className="mt-3 text-sm leading-6 text-slate-300">{description}</p>
+              <div className="mt-5">
+                <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                  <span>Progress</span>
+                  <span>{progress}%</span>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10">
+                  <div className="h-full rounded-full bg-emerald-400 transition-all duration-300" style={{ width: `${progress}%` }} />
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-2">
               {steps.map((step, index) => {
                 const complete = index < currentStep;
                 const active = index === currentStep;
@@ -44,7 +54,9 @@ export function OnboardingLayout({ title, description, currentStep, steps, child
                   <div
                     key={step}
                     className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${
-                      active ? "border-emerald-400/40 bg-emerald-400/10" : "border-white/10 bg-white/5"
+                      active
+                        ? "border-emerald-400/40 bg-emerald-400/10 shadow-[0_12px_30px_-20px_rgba(52,211,153,0.7)]"
+                        : "border-white/10 bg-white/[0.03]"
                     }`}
                   >
                     {complete ? (
@@ -68,8 +80,8 @@ export function OnboardingLayout({ title, description, currentStep, steps, child
           </Button>
         </aside>
 
-        <main className="flex items-center justify-center px-6 py-10 lg:px-12">
-          <div className="w-full max-w-4xl">{children}</div>
+        <main className="flex items-start justify-center px-6 py-8 lg:px-10 lg:py-10">
+          <div className="w-full max-w-5xl">{children}</div>
         </main>
       </div>
     </div>
