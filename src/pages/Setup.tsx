@@ -311,7 +311,7 @@ export default function Setup() {
                       <div>
                         <p className="text-sm font-medium text-slate-900">Activation next</p>
                         <p className="text-sm leading-6 text-slate-600">
-                          NexaOS will provision a recovery number, walk through forwarding, and verify the test call.
+                          NexaOS will choose the right phone path, provision the number, and verify one live test call.
                         </p>
                       </div>
                     </div>

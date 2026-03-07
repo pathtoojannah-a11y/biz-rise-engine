@@ -66,13 +66,33 @@ export function TwilioSettings() {
             </Badge>
           </div>
           <CardDescription>
-            NexaOS manages Twilio in the background. This page only shows the assigned recovery number and automation settings.
+            NexaOS manages Twilio in the background. This page shows how calls are routed plus the SMS automation settings.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div>
-            <Label>Assigned recovery number</Label>
-            <Input value={form.from_number || "Provision during onboarding"} disabled className="bg-muted/50" />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <Label>NexaOS number</Label>
+              <Input value={form.from_number || "Provision during onboarding"} disabled className="bg-muted/50" />
+            </div>
+            <div>
+              <Label>Phone path</Label>
+              <Input
+                value={form.phone_path === "A" ? "Path A: personal cell" : form.phone_path === "B" ? "Path B: business line" : "Pending"}
+                disabled
+                className="bg-muted/50"
+              />
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <Label>Customer-facing number</Label>
+              <Input value={form.public_number || "Set during onboarding"} disabled className="bg-muted/50" />
+            </div>
+            <div>
+              <Label>Contractor mobile</Label>
+              <Input value={form.contractor_phone || "Set during onboarding"} disabled className="bg-muted/50" />
+            </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
@@ -85,7 +105,7 @@ export function TwilioSettings() {
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Keep using the existing business number in public. Unanswered calls should forward to this NexaOS number.
+            Path A uses the NexaOS number publicly. Path B keeps the public number and forwards missed calls to NexaOS.
           </p>
         </CardContent>
       </Card>
@@ -142,6 +162,16 @@ export function TwilioSettings() {
               value={form.booking_link}
               onChange={(event) => handleChange("booking_link", event.target.value)}
               placeholder="https://calendly.com/your-business"
+            />
+          </div>
+          <div>
+            <Label>Review delay (days)</Label>
+            <Input
+              type="number"
+              min={1}
+              max={14}
+              value={form.review_delay_days}
+              onChange={(event) => handleChange("review_delay_days", Number(event.target.value || 2))}
             />
           </div>
           <div>

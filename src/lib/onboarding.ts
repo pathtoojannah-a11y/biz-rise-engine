@@ -1,6 +1,7 @@
 import { Json } from "@/integrations/supabase/types";
 
 export type ProvisioningScope = "local" | "state" | "fallback";
+export type PhonePath = "A" | "B";
 
 export interface OnboardingChecklist {
   workspace_created: boolean;
@@ -13,6 +14,7 @@ export interface OnboardingChecklist {
 export interface OnboardingConfig {
   created_via?: string;
   selected_industry?: string;
+  booking_link_ready?: boolean;
   provisioned_number_id?: string | null;
   provisioning_scope?: ProvisioningScope | null;
   forwarding_pending?: boolean;
@@ -39,6 +41,7 @@ export function createDefaultOnboardingConfig(industry?: string): OnboardingConf
   return {
     created_via: "guided_setup",
     selected_industry: industry,
+    booking_link_ready: false,
     provisioned_number_id: null,
     provisioning_scope: null,
     forwarding_pending: false,

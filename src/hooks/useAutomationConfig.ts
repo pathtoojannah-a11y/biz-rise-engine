@@ -8,11 +8,15 @@ export interface TwilioConfig {
   twilio_number_sid: string;
   provisioned_number_id: string;
   provisioning_scope: "local" | "state" | "fallback" | null;
+  contractor_phone: string;
+  public_number: string;
+  phone_path: "A" | "B" | null;
   missed_call_sms: boolean;
   qualification_flow: boolean;
   auto_create_job: boolean;
   missed_call_template: string;
   booking_link: string;
+  review_delay_days: number;
   review_template: string;
   office_hours: {
     enabled: boolean;
@@ -26,11 +30,15 @@ const DEFAULT_CONFIG: TwilioConfig = {
   twilio_number_sid: "",
   provisioned_number_id: "",
   provisioning_scope: null,
+  contractor_phone: "",
+  public_number: "",
+  phone_path: null,
   missed_call_sms: true,
   qualification_flow: true,
   auto_create_job: true,
   missed_call_template: "",
   booking_link: "",
+  review_delay_days: 2,
   review_template: "",
   office_hours: {
     enabled: false,
@@ -119,10 +127,15 @@ export function useAutomationConfig() {
   });
 
   const provisionNumber = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (payload: {
+      preferred_area_code?: string;
+      phone_path: "A" | "B";
+      contractor_phone?: string;
+      public_number?: string;
+    }) => {
       if (!workspace) throw new Error("No workspace");
       const { data, error } = await supabase.functions.invoke("provision-number", {
-        body: { workspace_id: workspace.id },
+        body: { workspace_id: workspace.id, ...payload },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);

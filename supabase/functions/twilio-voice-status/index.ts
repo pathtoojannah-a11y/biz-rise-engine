@@ -43,6 +43,13 @@ function getTwilioMasterAuthToken() {
   return Deno.env.get("TWILIO_MASTER_AUTH_TOKEN") || "";
 }
 
+function normalizePhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return `+${digits}`;
+}
+
 async function resolveWorkspace(supabase: any, toNumber: string) {
   const normalized = toNumber.replace(/\D/g, "");
   const variants = [toNumber, `+${normalized}`, `+1${normalized}`, normalized];
@@ -52,28 +59,21 @@ async function resolveWorkspace(supabase: any, toNumber: string) {
     .eq("provider", "twilio")
     .in("status", ["provisioned", "connected"]);
   if (!integrations) return null;
-  for (const int of integrations) {
-    const cfg = int.config as any;
-    if (!cfg?.from_number) continue;
-    const cfgNorm = cfg.from_number.replace(/\D/g, "");
+  for (const integration of integrations) {
+    const config = integration.config as any;
+    const configNumber = config?.from_number?.replace(/\D/g, "");
+    if (!configNumber) continue;
     if (
-      variants.includes(cfg.from_number) ||
-      variants.includes(cfgNorm) ||
-      normalized === cfgNorm ||
-      normalized.endsWith(cfgNorm) ||
-      cfgNorm.endsWith(normalized)
+      variants.includes(config.from_number) ||
+      variants.includes(configNumber) ||
+      normalized === configNumber ||
+      normalized.endsWith(configNumber) ||
+      configNumber.endsWith(normalized)
     ) {
-      return { workspace_id: int.workspace_id, config: cfg };
+      return { workspace_id: integration.workspace_id, config };
     }
   }
   return null;
-}
-
-function normalizePhone(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
-  if (digits.length === 10) return "+1" + digits;
-  if (digits.length === 11 && digits.startsWith("1")) return "+" + digits;
-  return "+" + digits;
 }
 
 async function logEvent(supabase: any, workspaceId: string, eventType: string, payload: Record<string, any>) {
@@ -89,11 +89,20 @@ async function upsertLeadByPhone(supabase: any, workspaceId: string, phone: stri
     .eq("normalized_phone", normalized)
     .limit(1);
   if (existing && existing.length > 0) return existing[0];
+
   const { data: newLead, error } = await supabase
     .from("leads")
-    .insert({ workspace_id: workspaceId, name: callerName || phone, phone, normalized_phone: normalized, source: "phone", status: "new" })
+    .insert({
+      workspace_id: workspaceId,
+      name: callerName || phone,
+      phone,
+      normalized_phone: normalized,
+      source: "phone",
+      status: "new",
+    })
     .select("id")
     .single();
+
   if (error) throw error;
   return newLead;
 }
@@ -106,7 +115,10 @@ async function sendSms(from: string, to: string, body: string) {
   const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
   const resp = await fetch(url, {
     method: "POST",
-    headers: { Authorization: `Basic ${btoa(`${accountSid}:${authToken}`)}`, "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      Authorization: `Basic ${btoa(`${accountSid}:${authToken}`)}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
     body: new URLSearchParams({ From: from, To: to, Body: body }),
   });
   const result = await resp.json();
@@ -134,46 +146,44 @@ Deno.serve(async (req) => {
   }
 
   const mode = new URL(req.url).searchParams.get("mode");
-  if (mode === "answer") {
-    return new Response(
-      "<Response><Say voice=\"alice\">Thanks for calling. We will text you right back.</Say><Hangup/></Response>",
-      { headers: { ...corsHeaders, "Content-Type": "text/xml" } },
-    );
-  }
-
+  const respondWithInfoMessage = mode === "answer" || mode === "missed";
+  const forceMissed = mode === "answer" || mode === "missed";
   const supabase = getServiceClient();
 
   try {
     const formData = await req.formData();
     const params: Record<string, string> = {};
-    formData.forEach((val, key) => {
-      params[key] = val.toString();
+    formData.forEach((value, key) => {
+      params[key] = value.toString();
     });
 
-    const callStatus = params.CallStatus;
     const callSid = params.CallSid;
     const calledNumber = params.Called || params.To || "";
     const callerNumber = params.Caller || params.From || "";
-    const duration = parseInt(params.CallDuration || params.Duration || "0", 10);
     const callerName = params.CallerName || "";
+    const duration = parseInt(params.CallDuration || params.Duration || "0", 10);
+    const rawStatus = params.DialCallStatus || params.CallStatus || "";
+    const callStatus = forceMissed ? "no-answer" : rawStatus;
 
-    const ws = await resolveWorkspace(supabase, calledNumber);
-    if (!ws) {
-      console.log("Unknown number:", calledNumber);
+    const workspaceMatch = await resolveWorkspace(supabase, calledNumber);
+    if (!workspaceMatch) {
       await logEvent(supabase, "00000000-0000-0000-0000-000000000000", "webhook_rejected", {
         reason: "unknown_number",
         called: calledNumber,
       });
-      return new Response("<Response/>", { headers: { ...corsHeaders, "Content-Type": "text/xml" } });
+      return new Response(
+        respondWithInfoMessage
+          ? "<Response><Say voice=\"alice\">Thanks for calling. We will text you right back.</Say><Hangup/></Response>"
+          : "<Response/>",
+        { headers: { ...corsHeaders, "Content-Type": "text/xml" } },
+      );
     }
 
-    const { workspace_id, config } = ws;
-
+    const { workspace_id, config } = workspaceMatch;
     const twilioSignature = req.headers.get("X-Twilio-Signature") || "";
     const twilioAuthToken = getTwilioMasterAuthToken();
     if (twilioAuthToken && twilioSignature) {
-      const webhookUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/twilio-voice-status`;
-      const valid = await validateTwilioSignature(twilioAuthToken, twilioSignature, webhookUrl, params);
+      const valid = await validateTwilioSignature(twilioAuthToken, twilioSignature, req.url, params);
       if (!valid) {
         await logEvent(supabase, workspace_id, "webhook_rejected", {
           reason: "invalid_signature",
@@ -195,6 +205,7 @@ Deno.serve(async (req) => {
       from: callerNumber,
       to: calledNumber,
       duration,
+      mode,
     });
 
     if (callSid) {
@@ -204,14 +215,20 @@ Deno.serve(async (req) => {
         .eq("twilio_sid", callSid)
         .limit(1);
       if (existingCall && existingCall.length > 0) {
-        return new Response("<Response/>", { headers: { ...corsHeaders, "Content-Type": "text/xml" } });
+        return new Response(
+          respondWithInfoMessage
+            ? "<Response><Say voice=\"alice\">Thanks for calling. We will text you right back.</Say><Hangup/></Response>"
+            : "<Response/>",
+          { headers: { ...corsHeaders, "Content-Type": "text/xml" } },
+        );
       }
     }
 
     const lead = await upsertLeadByPhone(supabase, workspace_id, callerNumber, callerName);
     await logEvent(supabase, workspace_id, "lead_upserted", { lead_id: lead.id, phone: callerNumber });
 
-    const isMissed = ["no-answer", "busy", "failed", "canceled"].includes(callStatus);
+    const missedStatuses = ["no-answer", "busy", "failed", "canceled", "voicemail"];
+    const isMissed = missedStatuses.includes(callStatus);
     const callStatusEnum = isMissed ? "missed" : callStatus === "voicemail" ? "voicemail" : "answered";
 
     await supabase.from("calls").insert({
@@ -242,7 +259,7 @@ Deno.serve(async (req) => {
         ? onboardingConfig.checklist
         : {};
 
-    if (!onboardingConfig.test_call_verified && onboardingConfig.test_call_started_at) {
+    if (!onboardingConfig.test_call_verified && onboardingConfig.test_call_started_at && isMissed) {
       await supabase
         .from("workspaces")
         .update({
@@ -273,26 +290,21 @@ Deno.serve(async (req) => {
       await logEvent(supabase, workspace_id, "forwarding_test_verified", {
         call_sid: callSid,
         lead_id: lead.id,
+        phone_path: config.phone_path ?? "B",
       });
     }
 
-    if (isMissed || callStatus === "voicemail") {
-      const automationEnabled = config.missed_call_sms !== false;
-
-      if (automationEnabled && config.from_number) {
-        const optedOut = await isOptedOut(supabase, workspace_id, lead.id);
-        if (optedOut) {
-          await logEvent(supabase, workspace_id, "sms_blocked_opt_out", { lead_id: lead.id });
-          return new Response("<Response/>", { headers: { ...corsHeaders, "Content-Type": "text/xml" } });
-        }
-
+    if (isMissed && config.from_number) {
+      const optedOut = await isOptedOut(supabase, workspace_id, lead.id);
+      if (optedOut) {
+        await logEvent(supabase, workspace_id, "sms_blocked_opt_out", { lead_id: lead.id });
+      } else {
         const template =
           config.missed_call_template ||
           `Sorry we missed your call to ${workspace?.name || "us"}. What service do you need help with?`;
 
         try {
           const smsResult = await sendSms(config.from_number, callerNumber, template);
-
           await supabase.from("conversations").insert({
             workspace_id,
             lead_id: lead.id,
@@ -300,7 +312,6 @@ Deno.serve(async (req) => {
             direction: "outbound",
             content: template,
           });
-
           await supabase.from("automation_sessions").upsert({
             workspace_id,
             lead_id: lead.id,
@@ -310,26 +321,31 @@ Deno.serve(async (req) => {
             status: "active",
             last_message_sid: smsResult.sid,
           }, { onConflict: "workspace_id,lead_id,type" });
-
           await logEvent(supabase, workspace_id, "sms_sent", {
             lead_id: lead.id,
             to: callerNumber,
             message_sid: smsResult.sid,
             template: "missed_call",
+            phone_path: config.phone_path ?? "B",
           });
-        } catch (smsErr: any) {
+        } catch (smsError: any) {
           await logEvent(supabase, workspace_id, "error", {
             step: "missed_call_sms",
             lead_id: lead.id,
-            error: smsErr.message,
+            error: smsError.message,
           });
         }
       }
     }
 
-    return new Response("<Response/>", { headers: { ...corsHeaders, "Content-Type": "text/xml" } });
-  } catch (err: any) {
-    console.error("voice-status error:", err);
+    return new Response(
+      respondWithInfoMessage
+        ? "<Response><Say voice=\"alice\">Thanks for calling. We will text you right back.</Say><Hangup/></Response>"
+        : "<Response/>",
+      { headers: { ...corsHeaders, "Content-Type": "text/xml" } },
+    );
+  } catch (error: any) {
+    console.error("voice-status error:", error);
     return new Response("<Response/>", { status: 200, headers: { ...corsHeaders, "Content-Type": "text/xml" } });
   }
 });

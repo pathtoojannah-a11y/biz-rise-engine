@@ -35,13 +35,10 @@ function withinOfficeHours(config: any, timezone: string | null): boolean {
 
   const [hour, minute] = formatter.format(new Date()).split(":").map((value) => parseInt(value, 10));
   const nowMinutes = hour * 60 + minute;
-
   const [startHour, startMinute] = officeHours.start.split(":").map((value) => parseInt(value, 10));
   const [endHour, endMinute] = officeHours.end.split(":").map((value) => parseInt(value, 10));
-  const startMinutes = startHour * 60 + startMinute;
-  const endMinutes = endHour * 60 + endMinute;
 
-  return nowMinutes >= startMinutes && nowMinutes <= endMinutes;
+  return nowMinutes >= startHour * 60 + startMinute && nowMinutes <= endHour * 60 + endMinute;
 }
 
 async function sendSms(from: string, to: string, body: string) {
@@ -95,6 +92,132 @@ Deno.serve(async (req) => {
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
   try {
+    const { data: integrations, error: integrationError } = await supabase
+      .from("integrations")
+      .select("workspace_id, config, status")
+      .eq("provider", "twilio")
+      .eq("status", "connected");
+
+    if (integrationError) throw integrationError;
+
+    let contractorPromptsSent = 0;
+    let contractorPromptsSkipped = 0;
+    let remindersSent = 0;
+    let finalizedNoResponse = 0;
+    let skippedOptOut = 0;
+
+    for (const integration of integrations || []) {
+      const config = (integration.config as Record<string, any> | null) ?? {};
+      if (!config.from_number || !config.contractor_phone) continue;
+
+      const { data: workspace } = await supabase
+        .from("workspaces")
+        .select("timezone")
+        .eq("id", integration.workspace_id)
+        .single();
+
+      if (!withinOfficeHours(config, workspace?.timezone || null)) {
+        contractorPromptsSkipped++;
+        continue;
+      }
+
+      const reviewDelayDays = Number(config.review_delay_days || 2) || 2;
+      const cutoffIso = new Date(Date.now() - reviewDelayDays * 24 * 60 * 60 * 1000).toISOString();
+
+      const { data: dueJobs } = await supabase
+        .from("jobs")
+        .select("id, lead_id, scheduled_at, status, leads!inner(name, phone)")
+        .eq("workspace_id", integration.workspace_id)
+        .eq("status", "scheduled")
+        .lte("scheduled_at", cutoffIso);
+
+      for (const job of dueJobs || []) {
+        if (!job.lead_id || !job.leads?.name) continue;
+
+        const optedOut = await isOptedOut(supabase, integration.workspace_id, job.lead_id);
+        if (optedOut) {
+          skippedOptOut++;
+          await logEvent(supabase, integration.workspace_id, "reminder_skipped", {
+            reason: "opted_out",
+            lead_id: job.lead_id,
+            job_id: job.id,
+            flow: "review_confirm",
+          });
+          continue;
+        }
+
+        const { data: existingReviewRequest } = await supabase
+          .from("review_requests")
+          .select("id")
+          .eq("job_id", job.id)
+          .limit(1);
+        if (existingReviewRequest && existingReviewRequest.length > 0) {
+          continue;
+        }
+
+        const { data: existingSession } = await supabase
+          .from("automation_sessions")
+          .select("*")
+          .eq("workspace_id", integration.workspace_id)
+          .eq("lead_id", job.lead_id)
+          .eq("type", "review_confirm")
+          .maybeSingle();
+
+        const answers = (existingSession?.answers as Record<string, any> | null) ?? {};
+        const attempts = Number(answers.attempts || 0);
+        const nextCheckAt = answers.next_check_at ? new Date(String(answers.next_check_at)).getTime() : 0;
+
+        if (existingSession?.status === "active") {
+          continue;
+        }
+
+        if (existingSession?.status === "skipped" && attempts >= 2) {
+          contractorPromptsSkipped++;
+          continue;
+        }
+
+        if (existingSession?.status === "skipped" && nextCheckAt && nextCheckAt > Date.now()) {
+          contractorPromptsSkipped++;
+          continue;
+        }
+
+        const prompt = `Job for ${job.leads.name} done? Reply YES to send the review request or NO to skip for now.`;
+
+        try {
+          const result = await sendSms(config.from_number, config.contractor_phone, prompt);
+          await supabase.from("automation_sessions").upsert({
+            workspace_id: integration.workspace_id,
+            lead_id: job.lead_id,
+            type: "review_confirm",
+            status: "active",
+            current_step: "awaiting_confirmation",
+            answers: {
+              ...answers,
+              job_id: job.id,
+              customer_name: job.leads.name,
+              attempts: attempts + 1,
+              next_check_at: null,
+            },
+            last_message_sid: result.sid,
+          }, { onConflict: "workspace_id,lead_id,type" });
+          contractorPromptsSent++;
+          await logEvent(supabase, integration.workspace_id, "contractor_review_prompt_sent", {
+            job_id: job.id,
+            lead_id: job.lead_id,
+            contractor_phone: config.contractor_phone,
+            message_sid: result.sid,
+            attempts: attempts + 1,
+          });
+        } catch (err: any) {
+          await logEvent(supabase, integration.workspace_id, "review_error", {
+            step: "contractor_review_prompt",
+            job_id: job.id,
+            error: err.message,
+          });
+        }
+      }
+    }
+
     const { data: pending, error } = await supabase
       .from("review_requests")
       .select("id, workspace_id, job_id, followup_count, sent_at, responded_at, status, outcome")
@@ -104,10 +227,6 @@ Deno.serve(async (req) => {
       .limit(500);
 
     if (error) throw error;
-
-    let remindersSent = 0;
-    let finalizedNoResponse = 0;
-    let skippedOptOut = 0;
 
     for (const reviewRequest of pending || []) {
       if (!reviewRequest.sent_at) continue;
@@ -197,7 +316,14 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ success: true, remindersSent, finalizedNoResponse, skippedOptOut }), {
+    return new Response(JSON.stringify({
+      success: true,
+      contractorPromptsSent,
+      contractorPromptsSkipped,
+      remindersSent,
+      finalizedNoResponse,
+      skippedOptOut,
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err: any) {

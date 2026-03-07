@@ -7,6 +7,7 @@ const corsHeaders = {
 };
 
 type ProvisioningScope = "local" | "state" | "fallback";
+type PhonePath = "A" | "B";
 
 function getServiceClient() {
   return createClient(
@@ -23,6 +24,21 @@ function getAuthClient(authHeader: string) {
   );
 }
 
+function normalizePhone(phone?: string | null) {
+  if (!phone) return "";
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return digits ? `+${digits}` : "";
+}
+
+function getAreaCode(phoneNumber: string) {
+  const digits = phoneNumber.replace(/\D/g, "");
+  if (digits.length >= 11) return digits.slice(1, 4);
+  if (digits.length >= 10) return digits.slice(0, 3);
+  return null;
+}
+
 function getTwilioAuthHeader() {
   const accountSid = Deno.env.get("TWILIO_MASTER_ACCOUNT_SID");
   const authToken = Deno.env.get("TWILIO_MASTER_AUTH_TOKEN");
@@ -36,11 +52,11 @@ function getTwilioAuthHeader() {
   };
 }
 
-function getAreaCode(phoneNumber: string) {
-  const digits = phoneNumber.replace(/\D/g, "");
-  if (digits.length >= 11) return digits.slice(1, 4);
-  if (digits.length >= 10) return digits.slice(0, 3);
-  return null;
+function buildVoiceUrl(webhookBaseUrl: string, phonePath: PhonePath) {
+  if (phonePath === "A") {
+    return `${webhookBaseUrl}/twilio-voice-handler`;
+  }
+  return `${webhookBaseUrl}/twilio-voice-status?mode=answer`;
 }
 
 async function lookupState(zipCode: string) {
@@ -58,9 +74,10 @@ async function searchAvailableNumber(
   authorization: string,
   params: Record<string, string>,
 ): Promise<string | null> {
-  const url = new URL("https://api.twilio.com/2010-04-01/Accounts");
-  url.pathname += `/${Deno.env.get("TWILIO_MASTER_ACCOUNT_SID")}/AvailablePhoneNumbers/US/Local.json`;
-
+  const accountSid = Deno.env.get("TWILIO_MASTER_ACCOUNT_SID");
+  const url = new URL(
+    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/AvailablePhoneNumbers/US/Local.json`,
+  );
   const searchParams = new URLSearchParams({ PageSize: "1", ...params });
   const response = await fetch(`${url.toString()}?${searchParams.toString()}`, {
     headers: { Authorization: authorization },
@@ -80,11 +97,13 @@ async function purchaseNumber(
   phoneNumber: string,
   friendlyName: string,
   webhookBaseUrl: string,
+  phonePath: PhonePath,
 ) {
+  const accountSid = Deno.env.get("TWILIO_MASTER_ACCOUNT_SID");
   const params = new URLSearchParams({
     PhoneNumber: phoneNumber,
     FriendlyName: friendlyName,
-    VoiceUrl: `${webhookBaseUrl}/twilio-voice-status?mode=answer`,
+    VoiceUrl: buildVoiceUrl(webhookBaseUrl, phonePath),
     VoiceMethod: "POST",
     StatusCallback: `${webhookBaseUrl}/twilio-voice-status`,
     StatusCallbackMethod: "POST",
@@ -93,7 +112,7 @@ async function purchaseNumber(
   });
 
   const response = await fetch(
-    `https://api.twilio.com/2010-04-01/Accounts/${Deno.env.get("TWILIO_MASTER_ACCOUNT_SID")}/IncomingPhoneNumbers.json`,
+    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/IncomingPhoneNumbers.json`,
     {
       method: "POST",
       headers: {
@@ -144,9 +163,40 @@ Deno.serve(async (req) => {
     }
 
     const userId = userData.user.id;
-    const { workspace_id } = await req.json();
+    const {
+      workspace_id,
+      preferred_area_code,
+      phone_path,
+      contractor_phone,
+      public_number,
+    } = await req.json();
+
     if (!workspace_id) {
       return new Response(JSON.stringify({ error: "Missing workspace_id" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (phone_path !== "A" && phone_path !== "B") {
+      return new Response(JSON.stringify({ error: "Choose whether customers call your cell or a separate business line first." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const normalizedContractorPhone = normalizePhone(contractor_phone);
+    const normalizedPublicNumber = normalizePhone(public_number);
+
+    if (!normalizedContractorPhone) {
+      return new Response(JSON.stringify({ error: "Add the mobile number NexaOS should ring and text." }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (phone_path === "B" && !normalizedPublicNumber) {
+      return new Response(JSON.stringify({ error: "Add the public business number customers already call." }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -196,14 +246,18 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (existingNumber) {
-      const provisioningScope =
-        (existingIntegration?.config as Record<string, unknown> | null)?.provisioning_scope ?? "fallback";
+      const existingConfig = (existingIntegration?.config as Record<string, unknown> | null) ?? {};
       return new Response(
         JSON.stringify({
           phone_number: existingNumber.phone_number,
           provisioned_number_id: existingNumber.id,
           status: existingIntegration?.status ?? existingNumber.status,
-          provisioning_scope: provisioningScope,
+          provisioning_scope: existingConfig.provisioning_scope ?? "fallback",
+          phone_path: existingConfig.phone_path ?? phone_path,
+          contractor_phone: existingConfig.contractor_phone ?? normalizedContractorPhone,
+          public_number:
+            existingConfig.public_number ??
+            (phone_path === "A" ? existingNumber.phone_number : normalizedPublicNumber),
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
@@ -215,23 +269,25 @@ Deno.serve(async (req) => {
     }
 
     const { authorization } = getTwilioAuthHeader();
-    let phoneNumber = null as string | null;
+    let phoneNumber: string | null = null;
     let provisioningScope: ProvisioningScope = "fallback";
+    const areaCode = String(preferred_area_code ?? "").replace(/\D/g, "").slice(0, 3);
 
-    if (workspace.business_zip) {
+    if (areaCode.length === 3) {
+      phoneNumber = await searchAvailableNumber(authorization, { AreaCode: areaCode });
+      if (phoneNumber) provisioningScope = "local";
+    }
+
+    if (!phoneNumber && workspace.business_zip) {
       phoneNumber = await searchAvailableNumber(authorization, { InPostalCode: workspace.business_zip });
-      if (phoneNumber) {
-        provisioningScope = "local";
-      }
+      if (phoneNumber) provisioningScope = "local";
     }
 
     if (!phoneNumber && workspace.business_zip) {
       const state = await lookupState(workspace.business_zip);
       if (state) {
         phoneNumber = await searchAvailableNumber(authorization, { InRegion: state });
-        if (phoneNumber) {
-          provisioningScope = "state";
-        }
+        if (phoneNumber) provisioningScope = "state";
       }
     }
 
@@ -249,6 +305,7 @@ Deno.serve(async (req) => {
       phoneNumber,
       `${workspace.name} Recovery Line`,
       webhookBaseUrl,
+      phone_path,
     );
 
     const { data: insertedNumber, error: insertError } = await supabase
@@ -272,6 +329,11 @@ Deno.serve(async (req) => {
       twilio_number_sid: purchased.sid,
       provisioned_number_id: insertedNumber.id,
       provisioning_scope: provisioningScope,
+      contractor_phone: normalizedContractorPhone,
+      public_number: phone_path === "A" ? purchased.phone_number : normalizedPublicNumber,
+      phone_path,
+      review_delay_days:
+        Number((existingIntegration?.config as Record<string, unknown> | null)?.review_delay_days ?? 2) || 2,
     };
 
     if (existingIntegration) {
@@ -315,7 +377,7 @@ Deno.serve(async (req) => {
       ...rawOnboarding,
       provisioned_number_id: insertedNumber.id,
       provisioning_scope: provisioningScope,
-      forwarding_pending: true,
+      forwarding_pending: phone_path === "B",
       test_call_verified: false,
       test_call_verified_at: null,
       test_call_started_at: null,
@@ -338,6 +400,9 @@ Deno.serve(async (req) => {
         provisioned_number_id: insertedNumber.id,
         status: "provisioned",
         provisioning_scope: provisioningScope,
+        phone_path,
+        contractor_phone: normalizedContractorPhone,
+        public_number: mergedConfig.public_number,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );

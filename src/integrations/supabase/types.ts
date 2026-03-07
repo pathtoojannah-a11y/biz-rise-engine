@@ -520,6 +520,7 @@ export type Database = {
           created_at: string
           friendly_name: string | null
           id: string
+          number_type: string
           phone_number: string
           provisioned_at: string | null
           status: string
@@ -531,6 +532,7 @@ export type Database = {
           created_at?: string
           friendly_name?: string | null
           id?: string
+          number_type?: string
           phone_number: string
           provisioned_at?: string | null
           status?: string
@@ -542,6 +544,7 @@ export type Database = {
           created_at?: string
           friendly_name?: string | null
           id?: string
+          number_type?: string
           phone_number?: string
           provisioned_at?: string | null
           status?: string

@@ -40,6 +40,13 @@ function normalizePhone(phone: string): string {
   return "+" + digits;
 }
 
+function urgencyLabel(raw: string) {
+  if (raw === "1") return "today";
+  if (raw === "2") return "this week";
+  if (raw === "3") return "not urgent";
+  return raw || "unspecified urgency";
+}
+
 async function resolveWorkspace(supabase: any, toNumber: string) {
   const normalized = toNumber.replace(/\D/g, "");
   const { data: integrations } = await supabase
@@ -90,13 +97,80 @@ async function isOptedOut(supabase: any, workspaceId: string, leadId: string): P
   return !!(data && data.length > 0);
 }
 
-const QUALIFICATION_STEPS: Record<string, { question: string; nextStep: string }> = {
-  step_1_service_type: { question: "Thanks! What type of service do you need? (for example plumbing, HVAC, electrical, and so on)", nextStep: "step_2_urgency" },
-  step_2_urgency: { question: "How urgent is this? Reply:\n1 - Emergency (today)\n2 - Soon (this week)\n3 - Not urgent", nextStep: "step_3_zip" },
-  step_3_zip: { question: "Last question - what is your zip code so we can check service coverage?", nextStep: "completed" },
-};
+async function sendReviewRequestForJob(
+  supabase: any,
+  workspaceId: string,
+  jobId: string,
+  config: any,
+) {
+  const { data: existing } = await supabase
+    .from("review_requests")
+    .select("id")
+    .eq("job_id", jobId)
+    .limit(1);
 
-const OPT_OUT_KEYWORDS = ["stop", "unsubscribe", "cancel", "quit", "end"];
+  if (existing && existing.length > 0) {
+    return { reviewRequestId: existing[0].id, alreadyExists: true, leadId: null, customerName: null };
+  }
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("id, lead_id, leads!inner(id, phone, name)")
+    .eq("id", jobId)
+    .single();
+
+  if (!job?.leads?.phone) {
+    throw new Error("Job is missing a customer phone number");
+  }
+
+  const { data: workspace } = await supabase
+    .from("workspaces")
+    .select("name")
+    .eq("id", workspaceId)
+    .single();
+
+  const now = new Date().toISOString();
+  const { data: reviewRequest, error: reviewError } = await supabase
+    .from("review_requests")
+    .insert({
+      workspace_id: workspaceId,
+      job_id: jobId,
+      status: "sent",
+      outcome: "pending",
+      sent_at: now,
+      followup_count: 0,
+    })
+    .select("id")
+    .single();
+
+  if (reviewError) throw reviewError;
+
+  const message = config.review_template || `How was your service with ${workspace?.name || "us"}? Reply 1-5.`;
+  const smsResult = await sendSms(config.from_number, job.leads.phone, message);
+
+  await supabase.from("conversations").insert({
+    workspace_id: workspaceId,
+    lead_id: job.leads.id,
+    channel: "sms",
+    direction: "outbound",
+    content: message,
+  });
+
+  await logEvent(supabase, workspaceId, "review_sms_sent", {
+    review_request_id: reviewRequest.id,
+    job_id: jobId,
+    lead_id: job.leads.id,
+    message_sid: smsResult.sid,
+    trigger: "contractor_sms_confirmation",
+  });
+
+  return {
+    reviewRequestId: reviewRequest.id,
+    alreadyExists: false,
+    leadId: job.leads.id,
+    customerName: job.leads.name,
+  };
+}
 
 async function handleReviewRating(
   supabase: any,
@@ -119,14 +193,9 @@ async function handleReviewRating(
   if (!review) return false;
 
   const rating = parseInt(body.trim(), 10);
-
   if (isNaN(rating) || rating < 1 || rating > 5) {
     try {
-      await sendSms(
-        config.from_number,
-        fromNumber,
-        "Please reply with a number from 1 to 5 to rate your experience.",
-      );
+      await sendSms(config.from_number, fromNumber, "Please reply with a number from 1 to 5 to rate your experience.");
       await supabase.from("conversations").insert({
         workspace_id: workspaceId,
         lead_id: leadId,
@@ -206,23 +275,21 @@ async function handleReviewRating(
       .limit(1);
 
     if (!existingTicket || existingTicket.length === 0) {
-      const priority = rating === 1 ? "high" : "medium";
       await supabase.from("feedback_tickets").insert({
         workspace_id: workspaceId,
         review_request_id: review.id,
         content: `Rating: ${rating}/5. Customer feedback pending.`,
         status: "open",
-        priority,
+        priority: rating === 1 ? "high" : "medium",
       });
       await logEvent(supabase, workspaceId, "private_ticket_created", {
         lead_id: leadId,
         review_request_id: review.id,
         rating,
-        priority,
       });
     }
 
-    const recoveryMsg = "Thank you for your feedback. We are sorry to hear about your experience. A manager will be in touch shortly to make things right.";
+    const recoveryMsg = "Thank you for your feedback. We appreciate you letting us know.";
     try {
       await sendSms(config.from_number, fromNumber, recoveryMsg);
       await supabase.from("conversations").insert({
@@ -246,6 +313,114 @@ async function handleReviewRating(
 
   return true;
 }
+
+async function handleContractorReply(
+  supabase: any,
+  workspaceId: string,
+  config: any,
+  body: string,
+) {
+  const reply = body.trim().toUpperCase();
+  const { data: sessions } = await supabase
+    .from("automation_sessions")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .eq("type", "review_confirm")
+    .in("status", ["active", "skipped"])
+    .order("updated_at", { ascending: false })
+    .limit(1);
+
+  const session = sessions?.[0];
+  if (!session) return false;
+
+  const answers = (session.answers as Record<string, any> | null) ?? {};
+  const jobId = String(answers.job_id || "");
+  const customerName = String(answers.customer_name || "the customer");
+  const attempts = Number(answers.attempts || 1);
+
+  if (!jobId) return false;
+
+  if (reply !== "YES" && reply !== "NO") {
+    await sendSms(config.from_number, config.contractor_phone, `Reply YES to send the review request for ${customerName}, or NO to skip for now.`);
+    return true;
+  }
+
+  if (reply === "YES") {
+    const { reviewRequestId, alreadyExists } = await sendReviewRequestForJob(supabase, workspaceId, jobId, config);
+    await supabase
+      .from("automation_sessions")
+      .update({
+        status: "completed",
+        current_step: "completed",
+        answers: {
+          ...answers,
+          attempts,
+          last_reply: "YES",
+          review_request_id: reviewRequestId,
+          responded_at: new Date().toISOString(),
+        },
+      })
+      .eq("id", session.id);
+
+    await supabase
+      .from("jobs")
+      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .eq("id", jobId);
+
+    await sendSms(
+      config.from_number,
+      config.contractor_phone,
+      alreadyExists ? `A review request for ${customerName} was already sent.` : `Review request sent to ${customerName}.`,
+    );
+    await logEvent(supabase, workspaceId, "contractor_review_confirmed", {
+      job_id: jobId,
+      review_request_id: reviewRequestId,
+      customer_name: customerName,
+    });
+    return true;
+  }
+
+  const nextCheckAt = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+  await supabase
+    .from("automation_sessions")
+    .update({
+      status: "skipped",
+      current_step: "waiting_retry",
+      answers: {
+        ...answers,
+        attempts,
+        last_reply: "NO",
+        next_check_at: nextCheckAt,
+        responded_at: new Date().toISOString(),
+      },
+    })
+    .eq("id", session.id);
+
+  await sendSms(config.from_number, config.contractor_phone, `Okay. We will check again in 2 days for ${customerName}.`);
+  await logEvent(supabase, workspaceId, "contractor_review_skipped", {
+    job_id: jobId,
+    customer_name: customerName,
+    next_check_at: nextCheckAt,
+  });
+  return true;
+}
+
+const QUALIFICATION_STEPS: Record<string, { question: string; nextStep: string }> = {
+  step_1_service_type: {
+    question: "Repair, tune-up, or install?",
+    nextStep: "step_2_urgency",
+  },
+  step_2_urgency: {
+    question: "How urgent is this? Reply 1 for today, 2 for this week, or 3 for not urgent.",
+    nextStep: "step_3_zip",
+  },
+  step_3_zip: {
+    question: "What is your zip code?",
+    nextStep: "completed",
+  },
+};
+
+const OPT_OUT_KEYWORDS = ["stop", "unsubscribe", "cancel", "quit", "end"];
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -281,8 +456,7 @@ Deno.serve(async (req) => {
     const twilioSignature = req.headers.get("X-Twilio-Signature") || "";
     const twilioAuthToken = getTwilioMasterAuthToken();
     if (twilioAuthToken && twilioSignature) {
-      const webhookUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/twilio-inbound-sms`;
-      const valid = await validateTwilioSignature(twilioAuthToken, twilioSignature, webhookUrl, params);
+      const valid = await validateTwilioSignature(twilioAuthToken, twilioSignature, req.url, params);
       if (!valid) {
         await logEvent(supabase, workspace_id, "webhook_rejected", { reason: "invalid_signature", message_sid: messageSid });
         return new Response("<Response/>", { status: 403, headers: { "Content-Type": "text/xml" } });
@@ -299,12 +473,20 @@ Deno.serve(async (req) => {
       body_preview: body.substring(0, 100),
     });
 
-    const normalized = normalizePhone(fromNumber);
+    const normalizedFrom = normalizePhone(fromNumber);
+    const contractorPhone = config.contractor_phone ? normalizePhone(config.contractor_phone) : "";
+    if (contractorPhone && normalizedFrom === contractorPhone) {
+      const handled = await handleContractorReply(supabase, workspace_id, config, body);
+      if (handled) {
+        return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
+      }
+    }
+
     const { data: existingLeads } = await supabase
       .from("leads")
       .select("id")
       .eq("workspace_id", workspace_id)
-      .eq("normalized_phone", normalized)
+      .eq("normalized_phone", normalizedFrom)
       .limit(1);
 
     let leadId: string;
@@ -313,7 +495,7 @@ Deno.serve(async (req) => {
     } else {
       const { data: newLead, error } = await supabase
         .from("leads")
-        .insert({ workspace_id, name: fromNumber, phone: fromNumber, normalized_phone: normalized, source: "sms", status: "new" })
+        .insert({ workspace_id, name: fromNumber, phone: fromNumber, normalized_phone: normalizedFrom, source: "sms", status: "new" })
         .select("id")
         .single();
       if (error) throw error;
@@ -361,107 +543,147 @@ Deno.serve(async (req) => {
       return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    if (/^\d$/.test(body.trim()) || /^[1-5]$/.test(body.trim())) {
+    if (/^[1-5]$/.test(body.trim())) {
       const handled = await handleReviewRating(supabase, config, workspace_id, leadId, fromNumber, body);
       if (handled) return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
     }
 
-    const qualificationEnabled = config.qualification_flow !== false;
-    if (qualificationEnabled) {
-      const { data: session } = await supabase
-        .from("automation_sessions")
-        .select("*")
-        .eq("workspace_id", workspace_id)
-        .eq("lead_id", leadId)
-        .eq("type", "qualification")
-        .eq("status", "active")
-        .single();
+    if (config.qualification_flow === false) {
+      return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
+    }
 
-      if (session) {
-        const currentStep = session.current_step;
-        const stepConfig = QUALIFICATION_STEPS[currentStep];
+    const { data: session } = await supabase
+      .from("automation_sessions")
+      .select("*")
+      .eq("workspace_id", workspace_id)
+      .eq("lead_id", leadId)
+      .eq("type", "qualification")
+      .eq("status", "active")
+      .single();
 
-        if (stepConfig) {
-          const answerKey = currentStep.replace("step_", "").replace(/^\d+_/, "");
-          const updatedAnswers = { ...((session.answers as any) || {}), [answerKey]: body };
+    if (!session) {
+      return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
+    }
 
-          if (stepConfig.nextStep === "completed") {
-            await supabase.from("automation_sessions").update({
-              current_step: "completed",
-              answers: updatedAnswers,
-              status: "completed",
-              last_message_sid: messageSid,
-            }).eq("id", session.id);
-            await supabase.from("leads").update({ status: "qualified" }).eq("id", leadId);
+    const currentStep = session.current_step;
+    const stepConfig = QUALIFICATION_STEPS[currentStep];
+    if (!stepConfig) {
+      return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
+    }
 
-            if (config.auto_create_job !== false) {
-              const { data: existingJob } = await supabase
-                .from("jobs")
-                .select("id")
-                .eq("workspace_id", workspace_id)
-                .eq("lead_id", leadId)
-                .limit(1);
-              if (!existingJob || existingJob.length === 0) {
-                const { data: firstStage } = await supabase
-                  .from("pipeline_stages")
-                  .select("id")
-                  .eq("workspace_id", workspace_id)
-                  .order("position")
-                  .limit(1)
-                  .single();
-                if (firstStage) {
-                  await supabase.from("jobs").insert({ workspace_id, lead_id: leadId, stage_id: firstStage.id, status: "scheduled" });
-                }
-              }
-            }
+    const answerKey = currentStep.replace("step_", "").replace(/^\d+_/, "");
+    const updatedAnswers = { ...((session.answers as any) || {}), [answerKey]: body };
 
-            let completionMsg = "Thanks! We have all the info we need. Someone will be in touch shortly.";
-            if (config.booking_link) completionMsg += `\n\nBook directly here: ${config.booking_link}`;
-            try {
-              await sendSms(config.from_number, fromNumber, completionMsg);
-              await supabase.from("conversations").insert({
-                workspace_id,
-                lead_id: leadId,
-                channel: "sms",
-                direction: "outbound",
-                content: completionMsg,
-              });
-            } catch (err: any) {
-              await logEvent(supabase, workspace_id, "error", { step: "completion_sms", error: err.message });
-            }
-            await logEvent(supabase, workspace_id, "qualification_completed", { lead_id: leadId, answers: updatedAnswers });
-          } else {
-            await supabase.from("automation_sessions").update({
-              current_step: stepConfig.nextStep,
-              answers: updatedAnswers,
-              last_message_sid: messageSid,
-            }).eq("id", session.id);
+    if (stepConfig.nextStep === "completed") {
+      await supabase.from("automation_sessions").update({
+        current_step: "completed",
+        answers: updatedAnswers,
+        status: "completed",
+        last_message_sid: messageSid,
+      }).eq("id", session.id);
+      await supabase.from("leads").update({ status: "qualified" }).eq("id", leadId);
 
-            const nextQuestion = QUALIFICATION_STEPS[stepConfig.nextStep];
-            if (nextQuestion) {
-              try {
-                await sendSms(config.from_number, fromNumber, nextQuestion.question);
-                await supabase.from("conversations").insert({
-                  workspace_id,
-                  lead_id: leadId,
-                  channel: "sms",
-                  direction: "outbound",
-                  content: nextQuestion.question,
-                });
-              } catch (err: any) {
-                await logEvent(supabase, workspace_id, "error", { step: "qualification_sms", error: err.message });
-              }
-            }
-            await supabase.from("leads").update({ status: "contacted" }).eq("id", leadId);
-            await logEvent(supabase, workspace_id, "qualification_step", {
-              lead_id: leadId,
-              from_step: currentStep,
-              to_step: stepConfig.nextStep,
-              answer: body,
-            });
+      let jobId: string | null = null;
+      if (config.auto_create_job !== false) {
+        const { data: existingJob } = await supabase
+          .from("jobs")
+          .select("id")
+          .eq("workspace_id", workspace_id)
+          .eq("lead_id", leadId)
+          .limit(1);
+        if (existingJob && existingJob.length > 0) {
+          jobId = existingJob[0].id;
+        } else {
+          const { data: firstStage } = await supabase
+            .from("pipeline_stages")
+            .select("id")
+            .eq("workspace_id", workspace_id)
+            .order("position")
+            .limit(1)
+            .single();
+          if (firstStage) {
+            const { data: job } = await supabase
+              .from("jobs")
+              .insert({ workspace_id, lead_id: leadId, stage_id: firstStage.id, status: "scheduled" })
+              .select("id")
+              .single();
+            jobId = job?.id ?? null;
           }
         }
       }
+
+      const { data: workspace } = await supabase
+        .from("workspaces")
+        .select("name")
+        .eq("id", workspace_id)
+        .single();
+
+      const contractorMessage = `New lead: ${updatedAnswers.service_type || "service request"}, ${urgencyLabel(updatedAnswers.urgency || "")}, ${updatedAnswers.zip || "no zip"}.\nCustomer: ${fromNumber}.\n${config.booking_link ? "Booking now." : "Reach out when you're ready."}`;
+
+      if (config.contractor_phone) {
+        try {
+          await sendSms(config.from_number, config.contractor_phone, contractorMessage);
+          await logEvent(supabase, workspace_id, "contractor_sms_sent", {
+            lead_id: leadId,
+            job_id: jobId,
+            contractor_phone: config.contractor_phone,
+          });
+        } catch (err: any) {
+          await logEvent(supabase, workspace_id, "error", { step: "contractor_notification_sms", error: err.message });
+        }
+      }
+
+      const customerMessage = config.booking_link
+        ? `Book a time that works for you: ${config.booking_link}`
+        : `Got it! Someone from ${workspace?.name || "the team"} will contact you shortly.`;
+
+      try {
+        await sendSms(config.from_number, fromNumber, customerMessage);
+        await supabase.from("conversations").insert({
+          workspace_id,
+          lead_id: leadId,
+          channel: "sms",
+          direction: "outbound",
+          content: customerMessage,
+        });
+      } catch (err: any) {
+        await logEvent(supabase, workspace_id, "error", { step: "completion_sms", error: err.message });
+      }
+
+      await logEvent(supabase, workspace_id, "qualification_completed", {
+        lead_id: leadId,
+        job_id: jobId,
+        answers: updatedAnswers,
+      });
+    } else {
+      await supabase.from("automation_sessions").update({
+        current_step: stepConfig.nextStep,
+        answers: updatedAnswers,
+        last_message_sid: messageSid,
+      }).eq("id", session.id);
+
+      const nextQuestion = QUALIFICATION_STEPS[stepConfig.nextStep];
+      if (nextQuestion) {
+        try {
+          await sendSms(config.from_number, fromNumber, nextQuestion.question);
+          await supabase.from("conversations").insert({
+            workspace_id,
+            lead_id: leadId,
+            channel: "sms",
+            direction: "outbound",
+            content: nextQuestion.question,
+          });
+        } catch (err: any) {
+          await logEvent(supabase, workspace_id, "error", { step: "qualification_sms", error: err.message });
+        }
+      }
+      await supabase.from("leads").update({ status: "contacted" }).eq("id", leadId);
+      await logEvent(supabase, workspace_id, "qualification_step", {
+        lead_id: leadId,
+        from_step: currentStep,
+        to_step: stepConfig.nextStep,
+        answer: body,
+      });
     }
 
     return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
