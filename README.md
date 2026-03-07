@@ -71,3 +71,36 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+
+## NexaOS Runtime Setup
+
+### New edge functions
+- `create-checkout-session`
+- `review-reminder-cron`
+
+### Required Supabase function secrets
+Set these in Supabase project secrets before deploying functions:
+
+- `STRIPE_SECRET_KEY`
+- `STRIPE_PRICE_ID_STARTER`
+- `STRIPE_PRICE_ID_PRO`
+- `APP_URL` (for checkout success/cancel redirect)
+- `REVIEW_REMINDER_CRON_SECRET` (optional but recommended)
+
+### Deploy functions
+```sh
+supabase functions deploy create-checkout-session
+supabase functions deploy review-reminder-cron
+```
+
+### Billing behavior
+- `/billing` now starts real Stripe Checkout for Starter/Professional plans.
+- Enterprise remains contact-sales via email.
+
+### Review reminders
+`review-reminder-cron` should be called on a schedule (external cron):
+- first reminder after 24h
+- second reminder after 72h from original request
+- finalizes as `no_response` after follow-up window expires
+
+Use header `x-cron-secret: <REVIEW_REMINDER_CRON_SECRET>` when invoking if secret is set.

@@ -1,0 +1,93 @@
+# Elite SaaS Teardown: Deep-Dive Evidence
+
+Based on your feedback, I deployed an automated browser agent to conduct deep, structural teardowns of three undisputed leaders in modern SaaS design: **Linear**, **Vercel**, and **Raycast**. 
+
+This document contains the *concrete evidence* of exactly how they structure their pages, their navigation hierarchy, and their exact copy.
+
+---
+
+## 1. Linear (linear.app)
+
+Linear is the defining standard for the modern "Dark Mode SaaS" aesthetic. Their site focuses incredibly heavily on visual product-led storytelling.
+
+### Global Navigation Hierarchy
+`Product` • `Resources` • `Customers` • [Pricing](file:///c:/Users/abe/OneDrive/NexaOS/src/pages/Pricing.tsx#6-96) • `Now` • `Contact` • `Log in` • **[ Sign up ]**
+
+### Exact Homepage Section Order
+1. **The Hero:** "The product development system for teams and agents." (CTA: Sign up). Immediately followed by a massive, immersive UI mockup.
+2. **Customer Marquee:** A minimalist, highly-muted row of logos (Vercel, Cursor, OpenAI).
+3. **Core Value Prop:** "A new species of product tool."
+4. **Chapter 1 (Purpose):** Deep dive into the mechanics of their system.
+5. **Chapter 2 (Agents):** Focus on AI capabilities.
+6. **Chapter 3 (Speed):** Highlight of technical performance.
+7. **The Changelog Bento Grid:** A 4-column grid showing recent updates.
+8. **Final CTA:** "Get started with Linear."
+
+### Evidence (Live Capture)
+
+**Linear Hero & Primary UI Positioning**
+![Linear Hero Section](file:///C:/Users/abe/.gemini/antigravity/brain/f88d5635-1809-4a13-a02c-bc49c0921596/linear_hero_1772681627846.png)
+
+**Linear Bento Grid (Changelog)**
+![Linear Bento Grid](file:///C:/Users/abe/.gemini/antigravity/brain/f88d5635-1809-4a13-a02c-bc49c0921596/linear_changelog_grid_1772681710487.png)
+
+---
+
+## 2. Vercel (vercel.com)
+
+Vercel is the benchmark for modular, "Bento Box" design. They manage an incredibly complex suite of products by keeping everything tightly boxed with minimal sub-pixel borders.
+
+### Global Navigation Hierarchy
+`Products` • `Resources` • `Solutions` • `Enterprise` • [Pricing](file:///c:/Users/abe/OneDrive/NexaOS/src/pages/Pricing.tsx#6-96) • `Log In` • `Ask AI` • **[ Sign Up ]**
+
+### Exact Homepage Section Order
+1. **Dynamic Hero:** "Build and deploy on the AI Cloud." (Primary CTA: "Start Deploying", Secondary: "Get a Demo").
+2. **Interactive Selection Grid:** A tabbed interface allowing users to select their workflow ("Deploy AI Apps in seconds").
+3. **Product Bento Grid:** A massive, multi-tiered grid highlighting their core modules (Agents, Web Apps, Commerce).
+4. **Technical Deep Dive:** "Framework-defined infrastructure."
+5. **Enterprise Proof:** Blocks dedicated to Security, Scale, and Performance.
+6. **Global Network Map:** Visualizing their edge nodes.
+7. **Customer Testimonials:** Large-scale quotes.
+8. **Template Grid & Final CTA.**
+
+### Evidence (Live Capture)
+
+**Vercel Hero (High Contrast, Geometric Sans)**
+![Vercel Hero](file:///C:/Users/abe/.gemini/antigravity/brain/f88d5635-1809-4a13-a02c-bc49c0921596/vercel_hero_1772681820562.png)
+
+**Vercel Feature Bento (The Standard for Feature Grids)**
+![Vercel Bento Products](file:///C:/Users/abe/.gemini/antigravity/brain/f88d5635-1809-4a13-a02c-bc49c0921596/vercel_bento_products_1772681842337.png)
+
+---
+
+## 3. Raycast (raycast.com)
+
+Raycast blends extreme functional utility with beautiful, subtle motion. Their site is heavily skewed toward showing exactly what the product does through static UI snippets.
+
+### Global Navigation Hierarchy
+`Store` • `Pro` • `AI` • `iOS` • `Windows` • `Teams` • `Developers` • `Blog` • [Pricing](file:///c:/Users/abe/OneDrive/NexaOS/src/pages/Pricing.tsx#6-96) • `Log in` • **[ Download ]**
+
+### Exact Homepage Section Order
+1. **The Hero:** "Your shortcut to everything." (Primary CTA: "Download for Mac").
+2. **Feature Showcase Scroll:** A chronological scroll highlighting core utilities linearly (Clipboard, Snippets, Window Management).
+3. **Ecosystem Proof:** Showcasing the "1,500+ extensions" store.
+4. **AI Capabilities Block.**
+5. **The Feature Bento Box:** A 3-block grid highlighting hotkeys and aliases.
+6. **Productivity Tiers:** Breakdown of Pro vs. Teams features.
+7. **Performance Bento Box:** A 4-column grid selling the "Speed" aspect ("Fast, Ergonomic, Native, Reliable").
+8. **Social Proof Wall:** Wall-to-wall tweets/quotes from power users.
+9. **Final CTA.**
+
+### Evidence (Live Capture)
+
+**Raycast Density Block (Feature Bento)**
+![Raycast Features Bento](file:///C:/Users/abe/.gemini/antigravity/brain/f88d5635-1809-4a13-a02c-bc49c0921596/raycast_bento_features_1772681993904.png)
+
+---
+
+## What this means for NexaOS (V2 Spec Validation)
+
+This hard evidence validates the V2 Spec we drafted:
+*   **The Global Nav is strictly constrained.** (Raycast, Linear, and Vercel all use a single, highly-contrast Primary CTA button on the far right. No emojis).
+*   **The "Linear" Hero structure is ubiquitous.** (Oversized H1 directly followed by the Product UI or an interactive selector, avoiding abstract illustrations).
+*   **The Bento Box is the industry standard for feature presentation.** (We will use this exact structure for the "Missed Call / Reviews / Pipeline" features).

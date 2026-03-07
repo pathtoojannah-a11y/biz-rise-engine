@@ -1,0 +1,138 @@
+# NexaOS: The Elite Build-Ready Engineering & Copy Spec (V2)
+
+This is the exact implementation document for the frontend engineering team. It translates the "Top Tier SaaS" aesthetic (Stripe/Linear/Vercel) into a grounded, high-converting React/Next.js build plan specific to NexaOS. 
+
+**Core Directives:**
+1. **Unified Theme:** The Obsidian Dark theme (Obsidian & Electric Emerald) is used globally across the entire site. No "light mode" variants for industry pages. Consistency builds enterprise trust. We will use `Geist` or `Inter` throughout.
+2. **Zero Emojis:** Emojis kill perceived seriousness in B2B SaaS. They are strictly forbidden in headlines, navigation, body copy, and CTAs.
+3. **Honest Claims:** Replace generic "AI triage" buzzwords with concrete mechanism terms ("automated routing," "rules-based dispatch") to ensure credibility.
+
+---
+
+## 1. Final Sitemap & Page Architecture
+
+**Primary Navigation Structure:**
+- **Product** (Dropdown: Lead Recovery, Reputation Ops, Pipeline Dispatch)
+- **Industries** (Dropdown: HVAC, Plumbing, Roofing, Electrical)
+- **Pricing** (`/pricing`)
+- **Resources** (Dropdown: ROI Calculator, Case Studies, Trust & Security)
+- **Log in** (`/login` - Ghost button)
+- **Book demo** (`/demo` - Primary Emerald button)
+
+**Core Conversion Pages to Build:**
+1. **Home** (`/`) - The flagship revenue engine pitch.
+2. **Book Demo** (`/demo`) - Interactive qualification and calendar embed widget.
+3. **Trust & Security** (`/trust`) - Short, enterprise-grade page detailing data privacy, uptime, and system reliability.
+4. **Pricing** (`/pricing`) - Transparent 3-tier view with an anchored middle tier.
+5. **Industry Template** (`/industry/hvac`) - Same global dark theme, focused purely on structural pain points.
+
+---
+
+## 2. Final Copy & Section Order (Homepage)
+
+### Section 1: The Linear-Style Hero
+*Purpose: 3-second comprehension + immediate UI proof.*
+*   **Eyebrow:** Platform Update: V2 Now Available.
+*   **H1:** Stop Missing Calls. Start Scaling Revenue.
+*   **Subheadline:** The automated operations platform for local service businesses. NexaOS instantly replies to missed calls, routes dispatching, and captures five-star reviews while your team is on the job.
+*   **Primary CTA:** Deploy NexaOS Today
+*   **Secondary CTA:** Watch the Product Demo
+*   **Centerpiece Asset:** Floating, interactive Hero Loop (See Section 6).
+
+### Section 2: The Honest Proof Stack (Marquee)
+*Purpose: Leverage partner credibility without faking numbers.*
+*   **Header:** Built to integrate with the systems you rely on.
+*   **Logos (Greyscale, 30% opacity):** QuickBooks, Google Business Profile, Twilio, Stripe, Yelp.
+
+### Section 3: The Threat (Problem Identification)
+*Purpose: Agitate the pain logically.*
+*   **H2:** If you are not first to reply, you have already lost the bid.
+*   **Body:** Homeowners do not leave voicemail. They call the next company on their list. Every unanswered call is a $500 to $5,000 job handed directly to your competitor. We fix that immediately.
+
+### Section 4: The Bento Box Grid (Features & UI)
+*Purpose: Structural presentation of the 3 core pillars.*
+
+*   **Block A (2/3 width, Top): Missed Call Recovery**
+    *   *Headline:* Infinite Inbound Capacity.
+    *   *Body:* Never send a lead to voicemail again. Automated SMS replies engage the customer instantly, securely capturing the lead details directly into your pipeline.
+    *   *Visual:* UI snippet showing a cascading text message triage flow.
+*   **Block B (1/3 width, Top): Review Routing**
+    *   *Headline:* Reputation on Autopilot.
+    *   *Body:* The second a job is marked 'Complete', we send a frictionless review request. Happy customers hit Google; frustrated ones route privately to your operations manager.
+    *   *Visual:* A glowing, five-star Google review widget over an Obsidian background.
+*   **Block C (Full width, Bottom): Pipeline Operations**
+    *   *Headline:* The Command Center for your Crew.
+    *   *Body:* Drag-and-drop scheduling, instant dispatching, and secure payment processing in one single pane of glass. Built for the front seat of a truck.
+    *   *Visual:* A dense, Airtable-style grid showing Job Status, Technician, and Value.
+
+### Section 5: The Workflow Comparison (The "Vercel" Finish)
+*Purpose: The exact old vs. new state.*
+*   **H2:** Shift from manual chaos to automated structure.
+
+| The Old Way (Manual) | The NexaOS Way (Automated) |
+| :--- | :--- |
+| Missed calls go to a full voicemail box. | Instant text-back engages the caller in 2 seconds. |
+| Relying on dispatchers to remember follow-ups. | Automated pipeline rules push jobs forward. |
+| Begging customers for reviews manually. | Frictionless, automated SMS review requests post-job. |
+| Disconnected tools for scheduling, SMS, and CRM. | One unified platform for your entire operation. |
+
+### Section 6: Bottom CTA
+*   **H2:** Build a business that runs itself.
+*   **Subhead:** Implement NexaOS in 30 minutes and recover your first lost job today.
+*   **CTA:** Start Operating
+*   *Subtext:* No credit card required. Cancel anytime.
+
+---
+
+## 3. The Trust & Security Page (`/trust`) Copy
+
+*Purpose: Remove objections from larger 20+ truck operators regarding data safety.*
+*   **Hero H1:** Enterprise-grade security for local service businesses.
+*   **Subheadline:** We protect your customer data, payment information, and operational infrastructure with the same rigorous standards as the Fortune 500.
+*   **Section 1 (Uptime & Reliability):** "99.99% Guaranteed Uptime. Your business does not stop, and neither do our servers."
+*   **Section 2 (Data Defense):** "End-to-end encryption for all customer data and SMS routing logs. TLS 1.3 standard applied universally."
+*   **Section 3 (Compliance):** "Fully native integrations with Stripe for PCI-compliant payment routing."
+
+---
+
+## 4. Exact Component Inventory & Styling Tokens
+
+This is the block-level inventory to build.
+*   **`GlobalNavbar`**: Sticky. `backdrop-blur-md`. Transparent bg becomes `rgba(10,10,10, 0.8)` on scroll. Border bottom: `1px solid rgba(255,255,255,0.05)`.
+*   **`GlobalTheme`**: Background: `bg-[#0A0A0A]`. Text: `text-white`. Secondary Text: `text-zinc-400`.
+*   **`HeroH1Text`**: Fluid typography using CSS `clamp(2.5rem, 5vw, 4.5rem)`. `letter-spacing: -0.04em`. Font: `font-sans` (Inter/Geist). Weight: `font-extrabold`.
+*   **`ButtonPrimary`**: Solid Emerald (`bg-[#10B981]`). Hover state: `transform: translateY(-1px)` + `box-shadow: 0 4px 20px rgba(16, 185, 129, 0.3)`. Border radius: `6px`. Text: `"Book Demo"`, never `"Book Demo 🚀"`.
+*   **`ButtonGhost`**: Transparent. Box border: `1px solid rgba(255,255,255, 0.1)`. Hover state: `background: rgba(255,255,255, 0.05)`.
+*   **`BentoCard`**: The core structural unit. Background: `rgba(255,255,255,0.02)`. Border: `1px solid rgba(255,255,255,0.08)`. Border-Radius: `12px`. Hover: Border color transitions to `rgba(255,255,255, 0.2)`. Transition: `border 300ms ease`.
+*   **`LogosMarquee`**: Infinite CSS animation (translateX). Will-change: transform.
+*   **`FloatingUIAsset`**: A wrapper for hero/bento images that applies a subtle `translateY` floating looping animation. `animation: float 4s ease-in-out infinite`.
+
+---
+
+## 5. Exact Motion Tokens
+
+No linear animations. We use specific cubic-beziers.
+*   **Easing Token (Standard Vercel/Linear Snappy):** `cubic-bezier(0.16, 1, 0.3, 1)` -> Use for Modals opening, Accordion expansion, Bento card hover states.
+*   **Easing Token (Soft/Float):** `cubic-bezier(0.25, 0.1, 0.25, 1)` -> Use for Continuous hero asset floating, tooltip fades.
+*   **Duration - Micro (Hover/State change):** `150ms`.
+*   **Duration - Macro (Section Reveals/Layout Shifts):** `600ms`.
+
+**Implementation of Section Reveals:**
+Elements entering the viewport start with `opacity: 0; transform: translateY(20px) scale(0.98);` and transition to `opacity: 1; transform: translateY(0) scale(1);` over 600ms `cubic-bezier(0.16, 1, 0.3, 1)`.
+
+---
+
+## 6. Hero Loop Storyboard (The Product UI as the Hero)
+
+*Instead of a generic phone, the center of the hero is a high-fidelity SVG/CSS reconstruction of the actual NexaOS dashboard functioning.*
+
+**Variant 1: The Revenue Save (Default Homepage)**
+*   **Frame 1:** A dark UI card appears: "Incoming Call: Unknown Number (555-0129)".
+*   **Frame 2 (1.0s):** Call moves to "Missed". A grey status indicator pings.
+*   **Frame 3 (1.5s):** Suddenly, a green "Automated Triage Executed" badge appears.
+*   **Frame 4 (2.0s):** An iMessage-style block slides in: *"Hi, this is [Company Name]. We missed your call. How can we help you today?"*
+*   **Frame 5 (3.5s):** Reply block: *"My AC is leaking."* Dashboard status updates from *Lead* to *Emergency Dispatch*.
+*   *Loop resets softly.*
+
+**Mobile Fallback Strategy:**
+*   Below 768px ([md](file:///c:/Users/abe/OneDrive/NexaOS/README.md) breakpoint): Render a static, high-res WebP image of Frame 5 to ensure a 100/100 Lighthouse performance score on mobile.
