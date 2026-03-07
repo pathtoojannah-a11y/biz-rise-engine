@@ -344,7 +344,7 @@ export default function GoLive() {
                 </CardTitle>
                 <CardDescription className="mt-2 max-w-2xl text-base text-slate-600">
                   {currentStep === 0 && "Check the business details NexaOS will use for setup."}
-                  {currentStep === 1 && "We give you a backup number for missed calls. You keep your normal business number."}
+                  {currentStep === 1 && "We create your backup number for missed calls. Your normal business number stays the same."}
                   {currentStep === 2 && "Turn on missed-call forwarding so unanswered calls reach NexaOS."}
                   {currentStep === 3 && "Run one real test call. As soon as NexaOS receives it, this step is done."}
                   {currentStep === 4 && "Add the Google review link that NexaOS should send after completed jobs."}
@@ -400,24 +400,38 @@ export default function GoLive() {
 
             {currentStep === 1 && (
               <div className="space-y-5">
+                <div className="flex flex-wrap gap-3">
+                  <div className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900">
+                    Keep your current business number
+                  </div>
+                  <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700">
+                    Turn on missed-call forwarding next
+                  </div>
+                </div>
+
                 <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
                   <div className="rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-6">
-                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">What happens now</p>
+                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">What to expect</p>
                     <div className="mt-5 space-y-3">
                       <div className="flex items-center gap-4 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
                         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">1</div>
-                        <p className="text-sm font-medium text-slate-900">NexaOS creates your backup number.</p>
+                        <p className="text-sm font-medium text-slate-900">We create your NexaOS backup number.</p>
                       </div>
                       <div className="flex items-center gap-4 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
                         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">2</div>
-                        <p className="text-sm font-medium text-slate-900">You keep using your current business number.</p>
+                        <p className="text-sm font-medium text-slate-900">Your public business number stays the same.</p>
                       </div>
                       <div className="flex items-center gap-4 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
                         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">3</div>
-                        <p className="text-sm font-medium text-slate-900">Next, you forward missed calls to the backup number.</p>
+                        <p className="text-sm font-medium text-slate-900">Next, you forward missed calls here.</p>
                       </div>
                     </div>
-                    <p className="mt-5 text-sm text-slate-600">No Twilio account or phone setup is shown to the contractor.</p>
+                    <div className="mt-5 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                      <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Why this matters</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-700">
+                        If you miss a call, NexaOS can catch it and reply fast instead of letting the lead go cold.
+                      </p>
+                    </div>
                   </div>
 
                   <div className="rounded-3xl bg-[linear-gradient(165deg,#022c22_0%,#052e16_54%,#020617_100%)] p-6 text-white shadow-[0_30px_80px_-40px_rgba(6,95,70,0.95)]">
@@ -437,8 +451,8 @@ export default function GoLive() {
                       <p className="mt-2 text-lg font-semibold capitalize">{integrationStatus}</p>
                       <p className="mt-2 text-sm leading-6 text-slate-200">
                         {isProvisioned
-                          ? "Ready. Go to the forwarding step."
-                          : "Click below and we'll assign it for you."}
+                          ? "Ready. Continue to forwarding."
+                          : "Click below to create it."}
                       </p>
                     </div>
 
