@@ -135,15 +135,15 @@ Deno.serve(async (req) => {
   try {
     const authClient = getAuthClient(authHeader);
     const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await authClient.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims?.sub) {
+    const { data: userData, error: userError } = await authClient.auth.getUser(token);
+    if (userError || !userData?.user?.id) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const userId = claimsData.claims.sub;
+    const userId = userData.user.id;
     const { workspace_id } = await req.json();
     if (!workspace_id) {
       return new Response(JSON.stringify({ error: "Missing workspace_id" }), {
