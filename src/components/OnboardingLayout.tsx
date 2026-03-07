@@ -17,9 +17,9 @@ export function OnboardingLayout({ title, description, currentStep, steps, child
   const progress = Math.round(((currentStep + 1) / steps.length) * 100);
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_26%),linear-gradient(180deg,#ecfdf5_0%,#f8fafc_48%,#f8fafc_100%)]">
       <div className="grid min-h-screen lg:grid-cols-[320px_1fr]">
-        <aside className="flex flex-col justify-between border-r border-slate-800 bg-slate-950 px-6 py-8 text-white">
+        <aside className="flex flex-col justify-between border-r border-emerald-500/10 bg-[linear-gradient(180deg,#02150f_0%,#052e16_42%,#020617_100%)] px-6 py-8 text-white">
           <div className="space-y-8">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/20 text-emerald-300">
@@ -31,7 +31,7 @@ export function OnboardingLayout({ title, description, currentStep, steps, child
               </div>
             </div>
 
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+            <div className="rounded-3xl border border-emerald-400/15 bg-white/5 p-5 shadow-[0_20px_60px_-40px_rgba(16,185,129,0.7)]">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">Activation Flow</p>
               <h1 className="mt-3 text-2xl font-black tracking-[-0.04em]">{title}</h1>
               <p className="mt-3 text-sm leading-6 text-slate-300">{description}</p>

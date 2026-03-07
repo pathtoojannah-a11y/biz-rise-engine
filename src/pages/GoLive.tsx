@@ -127,6 +127,8 @@ export default function GoLive() {
   const [savingHours, setSavingHours] = useState(false);
   const [startingTest, setStartingTest] = useState(false);
   const [provisioningError, setProvisioningError] = useState<string | null>(null);
+  const primaryButtonClass =
+    "bg-emerald-600 text-white hover:bg-emerald-700 shadow-[0_18px_40px_-24px_rgba(5,150,105,0.8)]";
 
   useEffect(() => {
     setCurrentStep((previous) => (recommendedStep > previous ? recommendedStep : previous));
@@ -333,7 +335,7 @@ export default function GoLive() {
       steps={STEP_LABELS}
     >
       <div className="space-y-6">
-        <Card className="border-slate-200/80 shadow-xl shadow-slate-200/50">
+        <Card className="border-emerald-100/80 bg-white/95 shadow-xl shadow-emerald-100/60">
           <CardHeader className="space-y-3">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -342,7 +344,7 @@ export default function GoLive() {
                 </CardTitle>
                 <CardDescription className="mt-2 max-w-2xl text-base text-slate-600">
                   {currentStep === 0 && "Check the business details NexaOS will use for setup."}
-                  {currentStep === 1 && "Assign one NexaOS number for missed calls. The contractor keeps using the normal business number."}
+                  {currentStep === 1 && "We give you a backup number for missed calls. You keep your normal business number."}
                   {currentStep === 2 && "Turn on missed-call forwarding so unanswered calls reach NexaOS."}
                   {currentStep === 3 && "Run one real test call. As soon as NexaOS receives it, this step is done."}
                   {currentStep === 4 && "Add the Google review link that NexaOS should send after completed jobs."}
@@ -388,7 +390,7 @@ export default function GoLive() {
                   </div>
                 </div>
                 <div className="lg:col-span-3 flex justify-end">
-                  <Button onClick={() => setCurrentStep(1)}>
+                  <Button className={primaryButtonClass} onClick={() => setCurrentStep(1)}>
                     Continue
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
@@ -399,37 +401,26 @@ export default function GoLive() {
             {currentStep === 1 && (
               <div className="space-y-5">
                 <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-                  <div className="rounded-3xl border border-slate-200 bg-white p-6">
-                    <p className="text-sm font-semibold text-slate-950">What this step does</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">
-                      NexaOS assigns a recovery number behind the scenes. The contractor keeps the regular business number and only forwards missed calls here.
-                    </p>
+                  <div className="rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-6">
+                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">What happens now</p>
                     <div className="mt-5 space-y-3">
-                      <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                        <div>
-                          <p className="text-sm font-medium text-slate-950">Keep the current phone number</p>
-                          <p className="text-sm text-slate-600">No website or truck wrap changes are needed first.</p>
-                        </div>
+                      <div className="flex items-center gap-4 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">1</div>
+                        <p className="text-sm font-medium text-slate-900">NexaOS creates your backup number.</p>
                       </div>
-                      <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                        <div>
-                          <p className="text-sm font-medium text-slate-950">NexaOS handles the phone infrastructure</p>
-                          <p className="text-sm text-slate-600">No Twilio account, API keys, or telecom setup is shown to the contractor.</p>
-                        </div>
+                      <div className="flex items-center gap-4 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">2</div>
+                        <p className="text-sm font-medium text-slate-900">You keep using your current business number.</p>
                       </div>
-                      <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-                        <div>
-                          <p className="text-sm font-medium text-slate-950">Next step is forwarding only</p>
-                          <p className="text-sm text-slate-600">After the number is ready, the contractor just turns on missed-call forwarding.</p>
-                        </div>
+                      <div className="flex items-center gap-4 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">3</div>
+                        <p className="text-sm font-medium text-slate-900">Next, you forward missed calls to the backup number.</p>
                       </div>
                     </div>
+                    <p className="mt-5 text-sm text-slate-600">No Twilio account or phone setup is shown to the contractor.</p>
                   </div>
 
-                  <div className="rounded-3xl bg-slate-950 p-6 text-white shadow-[0_30px_80px_-40px_rgba(15,23,42,0.9)]">
+                  <div className="rounded-3xl bg-[linear-gradient(165deg,#022c22_0%,#052e16_54%,#020617_100%)] p-6 text-white shadow-[0_30px_80px_-40px_rgba(6,95,70,0.95)]">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Your NexaOS number</p>
@@ -442,29 +433,29 @@ export default function GoLive() {
                       </Badge>
                     </div>
                     <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Current status</p>
+                      <p className="text-xs uppercase tracking-[0.18em] text-emerald-100/70">Status</p>
                       <p className="mt-2 text-lg font-semibold capitalize">{integrationStatus}</p>
-                      <p className="mt-2 text-sm leading-6 text-slate-300">
+                      <p className="mt-2 text-sm leading-6 text-slate-200">
                         {isProvisioned
-                          ? "The recovery number is assigned. Continue to the forwarding step."
-                          : "Click the button below to assign a number for missed-call recovery."}
+                          ? "Ready. Go to the forwarding step."
+                          : "Click below and we'll assign it for you."}
                       </p>
                     </div>
 
                     <div className="mt-6">
                       {isProvisioned ? (
-                        <Button className="w-full" onClick={() => setCurrentStep(2)}>
+                        <Button className={`w-full ${primaryButtonClass}`} onClick={() => setCurrentStep(2)}>
                           Continue to forwarding
                           <ArrowRight className="ml-2 h-4 w-4" />
                         </Button>
                       ) : (
-                        <Button className="w-full" onClick={handleProvision} disabled={provisionNumber.isPending}>
+                        <Button className={`w-full ${primaryButtonClass}`} onClick={handleProvision} disabled={provisionNumber.isPending}>
                           {provisionNumber.isPending ? (
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                           ) : (
                             <Phone className="mr-2 h-4 w-4" />
                           )}
-                          Assign my NexaOS number
+                          Create my NexaOS number
                         </Button>
                       )}
                     </div>
@@ -474,7 +465,7 @@ export default function GoLive() {
                 {provisioningError && (
                   <Alert variant="destructive" className="border-red-200 bg-red-50 text-red-950 [&>svg]:text-red-600">
                     <AlertTriangle className="h-4 w-4" />
-                    <AlertTitle>Number setup needs attention</AlertTitle>
+                    <AlertTitle>We couldn't create the number yet</AlertTitle>
                     <AlertDescription>
                       {provisioningError}
                     </AlertDescription>
@@ -507,7 +498,7 @@ export default function GoLive() {
                   <p className="mt-2 text-lg font-semibold text-slate-950">{carrierGuide.instructions(config.from_number || "(your NexaOS number)")}</p>
                 </div>
                 <div className="flex justify-end">
-                  <Button onClick={handleForwardingSaved} disabled={!config.from_number || savingForwarding}>
+                  <Button className={primaryButtonClass} onClick={handleForwardingSaved} disabled={!config.from_number || savingForwarding}>
                     {savingForwarding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                     I set the forwarding instructions
                   </Button>
@@ -552,13 +543,13 @@ export default function GoLive() {
 
                 <div className="flex justify-end gap-3">
                   {!onboarding.test_call_verified && (
-                    <Button onClick={handleStartTest} disabled={!config.from_number || startingTest}>
+                    <Button className={primaryButtonClass} onClick={handleStartTest} disabled={!config.from_number || startingTest}>
                       {startingTest ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Phone className="mr-2 h-4 w-4" />}
                       {onboarding.test_call_started_at ? "Retry test call" : "Start test call"}
                     </Button>
                   )}
                   {onboarding.test_call_verified && (
-                    <Button onClick={() => setCurrentStep(4)}>
+                    <Button className={primaryButtonClass} onClick={() => setCurrentStep(4)}>
                       Continue
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
@@ -580,7 +571,7 @@ export default function GoLive() {
                   <p className="text-sm text-slate-500">NexaOS uses this link after completed jobs when it asks for a review by text.</p>
                 </div>
                 <div className="flex justify-end">
-                  <Button onClick={handleSaveReviewLink} disabled={savingReviewLink}>
+                  <Button className={primaryButtonClass} onClick={handleSaveReviewLink} disabled={savingReviewLink}>
                     {savingReviewLink ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MapPin className="mr-2 h-4 w-4" />}
                     Save review routing
                   </Button>
@@ -602,7 +593,7 @@ export default function GoLive() {
                 </div>
                 <p className="text-sm text-slate-500">Reminder texts will respect this window so customers are not nudged outside business hours.</p>
                 <div className="flex justify-end">
-                  <Button onClick={handleSaveHours} disabled={savingHours}>
+                  <Button className={primaryButtonClass} onClick={handleSaveHours} disabled={savingHours}>
                     {savingHours ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Clock3 className="mr-2 h-4 w-4" />}
                     Save office hours
                   </Button>
@@ -644,7 +635,7 @@ export default function GoLive() {
                 </div>
 
                 <div className="flex justify-end">
-                  <Button onClick={handleLaunch} disabled={!canLaunch || launching}>
+                  <Button className={primaryButtonClass} onClick={handleLaunch} disabled={!canLaunch || launching}>
                     {launching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Rocket className="mr-2 h-4 w-4" />}
                     Launch workspace
                   </Button>
