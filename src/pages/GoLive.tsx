@@ -490,6 +490,36 @@ export default function GoLive() {
 
             {currentStep === 2 && (
               <div className="space-y-6">
+                <div className="flex flex-wrap gap-3">
+                  <div className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900">
+                    Use the phone number customers already call
+                  </div>
+                  <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700">
+                    Forward missed calls to {config.from_number || "your NexaOS number"}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-6">
+                  <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Do this now</p>
+                  <div className="mt-5 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">1</div>
+                      <p className="mt-3 text-sm font-semibold text-slate-950">Pick your carrier</p>
+                      <p className="mt-1 text-sm text-slate-600">Choose the phone company for your business number.</p>
+                    </div>
+                    <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">2</div>
+                      <p className="mt-3 text-sm font-semibold text-slate-950">Dial the code</p>
+                      <p className="mt-1 text-sm text-slate-600">Enter it on the business phone so missed calls forward to NexaOS.</p>
+                    </div>
+                    <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">3</div>
+                      <p className="mt-3 text-sm font-semibold text-slate-950">Come back here</p>
+                      <p className="mt-1 text-sm text-slate-600">After it is on, click the green button below.</p>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {Object.entries(CARRIER_GUIDES).map(([key, carrier]) => (
                     <button
@@ -503,18 +533,35 @@ export default function GoLive() {
                       }`}
                     >
                       <p className="text-sm font-semibold text-slate-950">{carrier.label}</p>
-                      <p className="mt-2 text-sm leading-6 text-slate-600">{carrier.instructions(config.from_number || "(your NexaOS number)")}</p>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        {selectedCarrier === key ? "Selected" : "Tap to use this carrier's code"}
+                      </p>
                     </button>
                   ))}
                 </div>
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Exact script</p>
-                  <p className="mt-2 text-lg font-semibold text-slate-950">{carrierGuide.instructions(config.from_number || "(your NexaOS number)")}</p>
+
+                <div className="rounded-3xl border border-slate-200 bg-slate-950 p-6 text-white shadow-[0_30px_80px_-40px_rgba(15,23,42,0.85)]">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Dial this on your business phone</p>
+                      <p className="mt-2 text-sm text-slate-300">{carrierGuide.label}</p>
+                    </div>
+                    <Badge className="rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-emerald-200 hover:bg-emerald-500/15">
+                      Missed calls only
+                    </Badge>
+                  </div>
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
+                    <p className="text-2xl font-semibold tracking-tight">{carrierGuide.instructions(config.from_number || "(your NexaOS number)")}</p>
+                  </div>
+                  <p className="mt-4 text-sm text-slate-300">
+                    This keeps your normal number public, but sends missed calls to NexaOS.
+                  </p>
                 </div>
+
                 <div className="flex justify-end">
                   <Button className={primaryButtonClass} onClick={handleForwardingSaved} disabled={!config.from_number || savingForwarding}>
                     {savingForwarding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    I set the forwarding instructions
+                    Forwarding is on
                   </Button>
                 </div>
               </div>
