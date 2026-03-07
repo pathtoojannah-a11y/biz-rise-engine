@@ -310,8 +310,8 @@ export default function Setup() {
                       <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
                       <div>
                         <p className="text-sm font-medium text-slate-900">Activation next</p>
-                        <p className="text-sm leading-6 text-slate-600">
-                          NexaOS will choose the right phone path, provision the number, and verify one live test call.
+                <p className="text-sm leading-6 text-slate-600">
+                          NexaOS will provision the number, connect it to the contractor's cell, and verify one live test call.
                         </p>
                       </div>
                     </div>

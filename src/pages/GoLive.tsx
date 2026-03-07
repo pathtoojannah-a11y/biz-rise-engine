@@ -25,41 +25,26 @@ import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { useAutomationConfig } from "@/hooks/useAutomationConfig";
 import { useLocations } from "@/hooks/useLocations";
-import { hasCoreSetup, isWorkspaceLive, normalizeOnboardingConfig, OnboardingConfig, PhonePath } from "@/lib/onboarding";
+import { hasCoreSetup, isWorkspaceLive, normalizeOnboardingConfig, OnboardingConfig } from "@/lib/onboarding";
 import { toast } from "sonner";
 
 const STEP_LABELS = [
   "Business info",
   "Phone setup",
-  "Number assignment",
   "Test call",
   "Booking link",
   "Google reviews",
   "Office hours",
 ];
 
-const CARRIER_GUIDES = {
-  att: {
-    label: "AT&T",
-    instructions: (number: string) => `*61*${number.replace(/\D/g, "")}#`,
-  },
-  verizon: {
-    label: "Verizon",
-    instructions: (number: string) => `*71${number.replace(/\D/g, "")}`,
-  },
-  tmobile: {
-    label: "T-Mobile",
-    instructions: (number: string) => `**61*${number.replace(/\D/g, "")}#`,
-  },
-  sprint: {
-    label: "Sprint",
-    instructions: (number: string) => `*73 then call ${number}`,
-  },
-  landline: {
-    label: "Landline / Other",
-    instructions: (number: string) => `Call your provider and ask for missed-call forwarding to ${number}`,
-  },
-} as const;
+const STEP_DESCRIPTIONS = [
+  "Check the business details NexaOS will use for launch.",
+  "Enter the cell number NexaOS should ring, then create your new business number.",
+  "Run one real missed-call test so NexaOS can verify the automation.",
+  "Decide whether qualified leads should get a booking link by text.",
+  "Paste your Google review link. High ratings go public. Low ratings stay private.",
+  "Set reminder hours, finish setup, and unlock the workspace.",
+];
 
 function normalizePhoneInput(value: string) {
   const digits = value.replace(/\D/g, "");
@@ -102,7 +87,7 @@ function getProvisioningErrorMessage(error: unknown) {
   }
 
   if (message.includes("No Twilio numbers available")) {
-    return "No recovery numbers are available right now. Try again shortly.";
+    return "No local business numbers are available right now. Try again shortly.";
   }
 
   return message || "We couldn't assign a NexaOS number yet.";
@@ -110,19 +95,14 @@ function getProvisioningErrorMessage(error: unknown) {
 
 function getRecommendedStep(
   onboarding: OnboardingConfig,
-  config: {
-    phone_path: PhonePath | null;
-    from_number: string;
-  },
+  config: { contractor_phone: string; from_number: string },
   hasReviewLink: boolean,
 ) {
-  if (!config.phone_path) return 1;
-  if (!config.from_number) return 2;
-  if (config.phone_path === "B" && !onboarding.forwarding_carrier) return 2;
-  if (!onboarding.test_call_verified) return 3;
-  if (!onboarding.booking_link_ready) return 4;
-  if (!hasReviewLink) return 5;
-  return 6;
+  if (!config.contractor_phone || !config.from_number) return 1;
+  if (!onboarding.test_call_verified) return 2;
+  if (!onboarding.booking_link_ready) return 3;
+  if (!hasReviewLink) return 4;
+  return 5;
 }
 
 export default function GoLive() {
@@ -134,20 +114,14 @@ export default function GoLive() {
 
   const onboarding = normalizeOnboardingConfig(workspace?.onboarding_config, workspace?.industry ?? undefined);
   const existingReviewLink = locations?.find((location) => location.google_review_link)?.google_review_link ?? "";
-  const recommendedStep = getRecommendedStep(onboarding, {
-    phone_path: config.phone_path,
-    from_number: config.from_number,
-  }, Boolean(existingReviewLink));
+  const recommendedStep = getRecommendedStep(
+    onboarding,
+    { contractor_phone: config.contractor_phone, from_number: config.from_number },
+    Boolean(existingReviewLink),
+  );
 
   const [currentStep, setCurrentStep] = useState(recommendedStep);
-  const [phonePath, setPhonePath] = useState<PhonePath | null>(config.phone_path ?? null);
-  const [publicNumber, setPublicNumber] = useState(
-    config.phone_path === "A" ? config.from_number : config.public_number || "",
-  );
   const [contractorPhone, setContractorPhone] = useState(config.contractor_phone || "");
-  const [selectedCarrier, setSelectedCarrier] = useState<keyof typeof CARRIER_GUIDES>(
-    (onboarding.forwarding_carrier as keyof typeof CARRIER_GUIDES | null) ?? "att",
-  );
   const [bookingChoice, setBookingChoice] = useState<"yes" | "no" | null>(
     config.booking_link ? "yes" : onboarding.booking_link_ready ? "no" : null,
   );
@@ -156,7 +130,6 @@ export default function GoLive() {
   const [officeStart, setOfficeStart] = useState(onboarding.office_open || config.office_hours.start || "08:00");
   const [officeEnd, setOfficeEnd] = useState(onboarding.office_close || config.office_hours.end || "18:00");
   const [savingPhoneSetup, setSavingPhoneSetup] = useState(false);
-  const [savingForwarding, setSavingForwarding] = useState(false);
   const [savingBooking, setSavingBooking] = useState(false);
   const [savingReviewLink, setSavingReviewLink] = useState(false);
   const [finishingSetup, setFinishingSetup] = useState(false);
@@ -171,12 +144,10 @@ export default function GoLive() {
   }, [recommendedStep]);
 
   useEffect(() => {
-    setPhonePath(config.phone_path ?? null);
-    setPublicNumber(config.phone_path === "A" ? config.from_number : config.public_number || "");
     setContractorPhone(config.contractor_phone || "");
     setBookingChoice(config.booking_link ? "yes" : onboarding.booking_link_ready ? "no" : null);
     setBookingLink(config.booking_link || "");
-  }, [config.phone_path, config.from_number, config.public_number, config.contractor_phone, config.booking_link, onboarding.booking_link_ready]);
+  }, [config.contractor_phone, config.booking_link, onboarding.booking_link_ready]);
 
   useEffect(() => {
     setReviewLink(existingReviewLink);
@@ -189,22 +160,15 @@ export default function GoLive() {
 
   useEffect(() => {
     if (!workspace || !onboarding.test_call_started_at || onboarding.test_call_verified) return;
-
     const interval = window.setInterval(() => {
       void refreshWorkspace();
     }, 4000);
-
     return () => window.clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace?.id, onboarding.test_call_started_at, onboarding.test_call_verified]);
 
-  if (!workspace) {
-    return <Navigate to="/setup" replace />;
-  }
-
-  if (isWorkspaceLive(onboarding)) {
-    return <Navigate to="/dashboard" replace />;
-  }
+  if (!workspace) return <Navigate to="/setup" replace />;
+  if (isWorkspaceLive(onboarding)) return <Navigate to="/dashboard" replace />;
 
   const persistOnboarding = async (
     updates: Partial<OnboardingConfig>,
@@ -222,68 +186,41 @@ export default function GoLive() {
 
     const { error } = await supabase
       .from("workspaces")
-      .update({ onboarding_config: nextConfig as any })
+      .update({ onboarding_config: nextConfig as never })
       .eq("id", workspace.id);
 
     if (error) throw error;
     await refreshWorkspace();
-    return nextConfig;
   };
 
   const handleSavePhoneSetup = async () => {
-    if (!phonePath) {
-      toast.error("Pick the phone setup that matches how customers reach you.");
-      return;
-    }
-
     if (!isPhoneValid(contractorPhone)) {
-      toast.error(phonePath === "A" ? "Enter the cell number NexaOS should ring." : "Enter the mobile number NexaOS should text.");
-      return;
-    }
-
-    if (phonePath === "B" && !isPhoneValid(publicNumber)) {
-      toast.error("Enter the public business number customers already call.");
+      toast.error("Enter the cell number NexaOS should ring.");
       return;
     }
 
     setSavingPhoneSetup(true);
     try {
-      await saveConfig.mutateAsync({
-        phone_path: phonePath,
-        contractor_phone: normalizePhone(contractorPhone),
-        public_number: phonePath === "B" ? normalizePhone(publicNumber) : "",
-      });
-      if (phonePath === "A") {
-        await persistOnboarding({ forwarding_carrier: null, forwarding_pending: false });
-      } else {
-        await persistOnboarding({ forwarding_carrier: null, forwarding_pending: true });
-      }
-      toast.success("Phone setup saved.");
-      setCurrentStep(2);
+      await saveConfig.mutateAsync({ contractor_phone: normalizePhone(contractorPhone) });
+      toast.success("Cell number saved.");
+      setCurrentStep(1);
     } catch (error: any) {
-      toast.error(error.message || "Could not save the phone setup.");
+      toast.error(error.message || "Could not save the cell number.");
     } finally {
       setSavingPhoneSetup(false);
     }
   };
 
   const handleProvision = async () => {
-    if (!phonePath) {
-      toast.error("Pick the phone setup first.");
-      return;
-    }
-
     setProvisioningError(null);
     try {
       await provisionNumber.mutateAsync({
-        phone_path: phonePath,
         contractor_phone: normalizePhone(contractorPhone),
-        public_number: phonePath === "B" ? normalizePhone(publicNumber) : undefined,
-        preferred_area_code: getAreaCode(phonePath === "A" ? contractorPhone : publicNumber),
+        preferred_area_code: getAreaCode(contractorPhone),
       });
       await refreshWorkspace();
-      toast.success(phonePath === "A" ? "Your new NexaOS number is ready." : "Your backup NexaOS number is ready.");
-      setCurrentStep(phonePath === "A" ? 3 : 2);
+      toast.success("Your new NexaOS number is ready.");
+      setCurrentStep(2);
     } catch (error) {
       const message = getProvisioningErrorMessage(error);
       setProvisioningError(message);
@@ -291,36 +228,11 @@ export default function GoLive() {
     }
   };
 
-  const handleForwardingSaved = async () => {
-    if (!config.from_number) return;
-    setSavingForwarding(true);
-    try {
-      await persistOnboarding({
-        forwarding_carrier: selectedCarrier,
-        forwarding_pending: true,
-      });
-      toast.success("Forwarding noted. Run the test call next.");
-      setCurrentStep(3);
-    } catch (error: any) {
-      toast.error(error.message || "Could not save the forwarding step.");
-    } finally {
-      setSavingForwarding(false);
-    }
-  };
-
   const handleStartTest = async () => {
     setStartingTest(true);
     try {
-      await persistOnboarding({
-        forwarding_carrier: phonePath === "B" ? selectedCarrier : null,
-        forwarding_pending: phonePath === "B",
-        test_call_started_at: new Date().toISOString(),
-      });
-      toast(
-        phonePath === "A"
-          ? "Use another phone to call your new NexaOS number and let it ring."
-          : "Use another phone to call your public business number and let it ring.",
-      );
+      await persistOnboarding({ test_call_started_at: new Date().toISOString() });
+      toast("Use another phone to call your new NexaOS number and let it ring.");
     } catch (error: any) {
       toast.error(error.message || "Could not start the test call.");
     } finally {
@@ -333,7 +245,6 @@ export default function GoLive() {
       toast.error("Choose whether you want NexaOS to send a booking link.");
       return;
     }
-
     if (bookingChoice === "yes" && !bookingLink.trim()) {
       toast.error("Paste the scheduling link before continuing.");
       return;
@@ -341,12 +252,10 @@ export default function GoLive() {
 
     setSavingBooking(true);
     try {
-      await saveConfig.mutateAsync({
-        booking_link: bookingChoice === "yes" ? bookingLink.trim() : "",
-      });
+      await saveConfig.mutateAsync({ booking_link: bookingChoice === "yes" ? bookingLink.trim() : "" });
       await persistOnboarding({ booking_link_ready: true });
       toast.success("Booking step saved.");
-      setCurrentStep(5);
+      setCurrentStep(4);
     } catch (error: any) {
       toast.error(error.message || "Could not save the booking link.");
     } finally {
@@ -382,7 +291,7 @@ export default function GoLive() {
       await persistOnboarding({}, { google_reviews_connected: true });
       await queryClient.invalidateQueries({ queryKey: ["locations", workspace.id] });
       toast.success("Google review routing is saved.");
-      setCurrentStep(6);
+      setCurrentStep(5);
     } catch (error: any) {
       toast.error(error.message || "Could not save the Google review link.");
     } finally {
@@ -394,11 +303,7 @@ export default function GoLive() {
     setFinishingSetup(true);
     try {
       await saveConfig.mutateAsync({
-        office_hours: {
-          enabled: true,
-          start: officeStart,
-          end: officeEnd,
-        },
+        office_hours: { enabled: true, start: officeStart, end: officeEnd },
         review_delay_days: config.review_delay_days || 2,
       });
       await persistOnboarding(
@@ -429,14 +334,10 @@ export default function GoLive() {
     },
   });
 
-  const customerFacingNumber =
-    phonePath === "A" ? config.from_number || "your new NexaOS number" : config.public_number || publicNumber || "your public business number";
-  const carrierGuide = CARRIER_GUIDES[selectedCarrier];
-
   return (
     <OnboardingLayout
       title="Launch Your Phone Assistant"
-      description="Answer one phone question, activate the number flow, then let NexaOS handle missed-call follow-up by text."
+      description="Add your cell number once, get a new NexaOS business number, and let missed calls turn into text conversations automatically."
       currentStep={currentStep}
       steps={STEP_LABELS}
     >
@@ -449,13 +350,7 @@ export default function GoLive() {
                   {STEP_LABELS[currentStep]}
                 </CardTitle>
                 <CardDescription className="mt-2 max-w-2xl text-base text-slate-600">
-                  {currentStep === 0 && "Check the business details NexaOS will use for launch."}
-                  {currentStep === 1 && "Tell NexaOS what number customers call so we can route the right phone path."}
-                  {currentStep === 2 && "NexaOS assigns the right number for your phone path and gives you the next action."}
-                  {currentStep === 3 && "Run one real missed-call test so NexaOS can verify the automation."}
-                  {currentStep === 4 && "Decide whether qualified leads should get a booking link by text."}
-                  {currentStep === 5 && "Paste your Google review link. High ratings go public. Low ratings stay private."}
-                  {currentStep === 6 && "Set reminder hours, finish setup, and unlock the workspace."}
+                  {STEP_DESCRIPTIONS[currentStep]}
                 </CardDescription>
               </div>
               <Badge variant="secondary" className="rounded-full px-3 py-1 text-xs uppercase tracking-[0.18em]">
@@ -506,252 +401,91 @@ export default function GoLive() {
 
             {currentStep === 1 && (
               <div className="space-y-6">
-                <div className="grid gap-4 lg:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => setPhonePath("A")}
-                    className={`rounded-3xl border p-6 text-left transition ${
-                      phonePath === "A"
-                        ? "border-emerald-500 bg-emerald-50 shadow-sm"
-                        : "border-slate-200 bg-white hover:border-slate-300"
-                    }`}
-                  >
-                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Path A</p>
-                    <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">My personal cell</h3>
-                    <p className="mt-3 text-sm leading-6 text-slate-600">
-                      NexaOS gives you a new local business number. Customers call that number, it rings your cell, and missed calls get handled automatically.
-                    </p>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setPhonePath("B")}
-                    className={`rounded-3xl border p-6 text-left transition ${
-                      phonePath === "B"
-                        ? "border-emerald-500 bg-emerald-50 shadow-sm"
-                        : "border-slate-200 bg-white hover:border-slate-300"
-                    }`}
-                  >
-                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Path B</p>
-                    <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">A separate business line</h3>
-                    <p className="mt-3 text-sm leading-6 text-slate-600">
-                      Keep the public business number you already use. NexaOS gives you a private backup number and you forward only missed calls to it.
-                    </p>
-                  </button>
-                </div>
-
-                {phonePath && (
-                  <div className="grid gap-5 lg:grid-cols-2">
-                    {phonePath === "A" ? (
-                      <>
-                        <div className="space-y-2">
-                          <Label htmlFor="contractor-cell">Cell number NexaOS should ring</Label>
-                          <Input
-                            id="contractor-cell"
-                            value={contractorPhone}
-                            onChange={(event) => setContractorPhone(normalizePhoneInput(event.target.value))}
-                            placeholder="(313) 555-1234"
-                          />
-                          <p className="text-sm text-slate-500">When customers call your new NexaOS number, this cell rings.</p>
-                        </div>
-                        <div className="rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-5">
-                          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">What changes</p>
-                          <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
-                            <li>Customers call a new local NexaOS number.</li>
-                            <li>Your cell still rings in real time.</li>
-                            <li>No carrier forwarding setup is needed.</li>
-                          </ul>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="space-y-5">
-                          <div className="space-y-2">
-                            <Label htmlFor="public-number">Public business number</Label>
-                            <Input
-                              id="public-number"
-                              value={publicNumber}
-                              onChange={(event) => setPublicNumber(normalizePhoneInput(event.target.value))}
-                              placeholder="(313) 555-1234"
-                            />
-                            <p className="text-sm text-slate-500">This is the number customers already call today.</p>
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="contractor-mobile">Mobile number for NexaOS texts</Label>
-                            <Input
-                              id="contractor-mobile"
-                              value={contractorPhone}
-                              onChange={(event) => setContractorPhone(normalizePhoneInput(event.target.value))}
-                              placeholder="(313) 555-1234"
-                            />
-                            <p className="text-sm text-slate-500">NexaOS sends new-lead alerts and review confirmations here.</p>
-                          </div>
-                        </div>
-                        <div className="rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-5">
-                          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">What changes</p>
-                          <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
-                            <li>Your public number stays public.</li>
-                            <li>NexaOS gives you a private backup number.</li>
-                            <li>You only turn on missed-call forwarding after the number is assigned.</li>
-                          </ul>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                <div className="flex justify-end">
-                  <Button className={primaryButtonClass} onClick={handleSavePhoneSetup} disabled={savingPhoneSetup}>
-                    {savingPhoneSetup ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Continue
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {currentStep === 2 && (
-              <div className="space-y-6">
-                {phonePath === "A" ? (
-                  <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-                    <div className="rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-6">
-                      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Path A</p>
-                      <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Your new business number</h3>
+                <div className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr]">
+                  <div className="space-y-5 rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-6">
+                    <div>
+                      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">One phone field</p>
+                      <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">What's your cell number?</h3>
                       <p className="mt-3 text-sm leading-6 text-slate-600">
-                        NexaOS will reserve a local number that customers can call directly. It rings {contractorPhone || "your cell"} and handles missed calls automatically.
+                        This is the cell that rings when someone calls your new NexaOS business number.
                       </p>
-                      <div className="mt-5 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
-                        <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Use publicly after setup</p>
-                        <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                          {config.from_number || "Not assigned yet"}
-                        </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="contractor-phone">Cell number</Label>
+                      <Input
+                        id="contractor-phone"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        value={contractorPhone}
+                        onChange={(event) => setContractorPhone(normalizePhoneInput(event.target.value))}
+                        placeholder="(313) 555-1234"
+                        className="h-12 border-slate-200 bg-white"
+                      />
+                      <p className="text-sm text-slate-500">
+                        Put your NexaOS number on your truck, website, and Google listing. When customers call it, your cell rings.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">1</div>
+                        <p className="mt-3 text-sm font-semibold text-slate-950">Create your number</p>
+                        <p className="mt-1 text-sm text-slate-600">NexaOS assigns a local business number.</p>
+                      </div>
+                      <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">2</div>
+                        <p className="mt-3 text-sm font-semibold text-slate-950">Use it publicly</p>
+                        <p className="mt-1 text-sm text-slate-600">This becomes the number customers call.</p>
+                      </div>
+                      <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">3</div>
+                        <p className="mt-3 text-sm font-semibold text-slate-950">Missed calls become texts</p>
+                        <p className="mt-1 text-sm text-slate-600">If you miss it, NexaOS starts the reply flow automatically.</p>
                       </div>
                     </div>
 
-                    <div className="rounded-3xl bg-[linear-gradient(165deg,#022c22_0%,#052e16_54%,#020617_100%)] p-6 text-white shadow-[0_30px_80px_-40px_rgba(6,95,70,0.95)]">
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Status</p>
-                      <p className="mt-2 text-2xl font-semibold tracking-tight">{config.from_number || "Waiting on assignment"}</p>
-                      <p className="mt-3 text-sm leading-6 text-slate-200">
-                        {isProvisioned
-                          ? "Your new public NexaOS number is ready. Next, run one missed-call test."
-                          : "Create the number now. NexaOS will search for a local match first."}
-                      </p>
-                      <div className="mt-6">
-                        {isProvisioned ? (
-                          <Button className={`w-full ${primaryButtonClass}`} onClick={() => setCurrentStep(3)}>
-                            Continue to test call
-                            <ArrowRight className="ml-2 h-4 w-4" />
-                          </Button>
-                        ) : (
-                          <Button className={`w-full ${primaryButtonClass}`} onClick={handleProvision} disabled={provisionNumber.isPending}>
-                            {provisionNumber.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Phone className="mr-2 h-4 w-4" />}
-                            Create my NexaOS number
-                          </Button>
-                        )}
-                      </div>
+                    <div className="flex justify-end gap-3">
+                      <Button variant="outline" onClick={handleSavePhoneSetup} disabled={savingPhoneSetup}>
+                        {savingPhoneSetup ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Save cell number
+                      </Button>
+                      <Button
+                        className={primaryButtonClass}
+                        onClick={handleProvision}
+                        disabled={!isPhoneValid(contractorPhone) || provisionNumber.isPending}
+                      >
+                        {provisionNumber.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Phone className="mr-2 h-4 w-4" />}
+                        {isProvisioned ? "Recheck my number" : "Create my business number"}
+                      </Button>
                     </div>
                   </div>
-                ) : (
-                  <div className="space-y-5">
-                    <div className="flex flex-wrap gap-3">
-                      <div className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900">
-                        Keep {publicNumber || "your current number"} public
+
+                  <div className="rounded-3xl bg-[linear-gradient(165deg,#022c22_0%,#052e16_54%,#020617_100%)] p-6 text-white shadow-[0_30px_80px_-40px_rgba(6,95,70,0.95)]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Your business number</p>
+                        <p className="mt-2 text-3xl font-semibold tracking-tight">{config.from_number || "Not assigned yet"}</p>
                       </div>
-                      <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700">
-                        Forward missed calls to {config.from_number || "your backup NexaOS number"}
-                      </div>
+                      <Badge className="rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-emerald-200 hover:bg-emerald-500/15">
+                        {isProvisioned ? "Ready" : "Waiting"}
+                      </Badge>
                     </div>
 
-                    {!isProvisioned ? (
-                      <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-                        <div className="rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-6">
-                          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Path B</p>
-                          <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Create your backup number</h3>
-                          <p className="mt-3 text-sm leading-6 text-slate-600">
-                            NexaOS assigns a private number that only catches missed calls from your public business line.
-                          </p>
-                        </div>
-                        <div className="rounded-3xl bg-[linear-gradient(165deg,#022c22_0%,#052e16_54%,#020617_100%)] p-6 text-white shadow-[0_30px_80px_-40px_rgba(6,95,70,0.95)]">
-                          <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Backup number</p>
-                          <p className="mt-2 text-2xl font-semibold tracking-tight">Not assigned yet</p>
-                          <div className="mt-6">
-                            <Button className={`w-full ${primaryButtonClass}`} onClick={handleProvision} disabled={provisionNumber.isPending}>
-                              {provisionNumber.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Phone className="mr-2 h-4 w-4" />}
-                              Create backup number
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-6">
-                          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Do this on your public line</p>
-                          <div className="mt-5 grid gap-3 md:grid-cols-3">
-                            <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-4">
-                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">1</div>
-                              <p className="mt-3 text-sm font-semibold text-slate-950">Pick your carrier</p>
-                              <p className="mt-1 text-sm text-slate-600">Choose the company behind {publicNumber || "your public number"}.</p>
-                            </div>
-                            <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-4">
-                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">2</div>
-                              <p className="mt-3 text-sm font-semibold text-slate-950">Dial the code</p>
-                              <p className="mt-1 text-sm text-slate-600">This tells your carrier to forward only missed calls to NexaOS.</p>
-                            </div>
-                            <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-4">
-                              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-700">3</div>
-                              <p className="mt-3 text-sm font-semibold text-slate-950">Come back here</p>
-                              <p className="mt-1 text-sm text-slate-600">Then run the test call on your public number.</p>
-                            </div>
-                          </div>
-                        </div>
+                    <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 px-5 py-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Rings this cell</p>
+                      <p className="mt-2 text-2xl font-semibold tracking-tight">
+                        {normalizePhone(contractorPhone) || "Add your cell number first"}
+                      </p>
+                    </div>
 
-                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                          {Object.entries(CARRIER_GUIDES).map(([key, carrier]) => (
-                            <button
-                              key={key}
-                              type="button"
-                              onClick={() => setSelectedCarrier(key as keyof typeof CARRIER_GUIDES)}
-                              className={`rounded-3xl border p-4 text-left transition ${
-                                selectedCarrier === key
-                                  ? "border-emerald-500 bg-emerald-50 shadow-sm"
-                                  : "border-slate-200 bg-white hover:border-slate-300"
-                              }`}
-                            >
-                              <p className="text-sm font-semibold text-slate-950">{carrier.label}</p>
-                              <p className="mt-2 text-sm leading-6 text-slate-600">
-                                {selectedCarrier === key ? "Selected" : "Tap to use this carrier's code"}
-                              </p>
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="rounded-3xl border border-slate-200 bg-slate-950 p-6 text-white shadow-[0_30px_80px_-40px_rgba(15,23,42,0.85)]">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div>
-                              <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Dial this on {publicNumber || "your public line"}</p>
-                              <p className="mt-2 text-sm text-slate-300">{carrierGuide.label}</p>
-                            </div>
-                            <Badge className="rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-emerald-200 hover:bg-emerald-500/15">
-                              Backup number
-                            </Badge>
-                          </div>
-                          <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-                            <p className="text-2xl font-semibold tracking-tight">{carrierGuide.instructions(config.from_number || "(your NexaOS number)")}</p>
-                          </div>
-                          <p className="mt-4 text-sm text-slate-300">
-                            Customers still call {publicNumber || "your public number"}. Only missed calls route to {config.from_number}.
-                          </p>
-                        </div>
-
-                        <div className="flex justify-end">
-                          <Button className={primaryButtonClass} onClick={handleForwardingSaved} disabled={savingForwarding}>
-                            {savingForwarding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                            I turned on missed-call forwarding
-                          </Button>
-                        </div>
-                      </>
-                    )}
+                    <div className="mt-6 space-y-3 text-sm text-slate-300">
+                      <p>Customers call your NexaOS number.</p>
+                      <p>Your cell rings like a normal call.</p>
+                      <p>If you miss it, NexaOS texts the customer and starts qualification.</p>
+                    </div>
                   </div>
-                )}
+                </div>
 
                 {provisioningError && (
                   <Alert variant="destructive" className="border-red-200 bg-red-50 text-red-950 [&>svg]:text-red-600">
@@ -763,37 +497,25 @@ export default function GoLive() {
               </div>
             )}
 
-            {currentStep === 3 && (
+            {currentStep === 2 && (
               <div className="space-y-6">
                 <div className="rounded-3xl border border-slate-200 bg-white p-6">
                   <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Run one real test</p>
                   <ol className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
-                    {phonePath === "A" ? (
-                      <>
-                        <li>1. Use another phone and call your new NexaOS number.</li>
-                        <li>2. Let your cell ring, but do not answer.</li>
-                        <li>3. NexaOS should catch the miss and mark this step complete automatically.</li>
-                      </>
-                    ) : (
-                      <>
-                        <li>1. Use another phone and call your public business number.</li>
-                        <li>2. Do not answer it.</li>
-                        <li>3. The missed call should forward to NexaOS and complete this step automatically.</li>
-                      </>
-                    )}
+                    <li>1. Use a different phone and call your new NexaOS business number.</li>
+                    <li>2. Let your cell ring, but do not answer.</li>
+                    <li>3. NexaOS should catch the miss and mark this step complete automatically.</li>
                   </ol>
 
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
                     <div className="rounded-2xl bg-slate-950 px-5 py-4 text-white">
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
-                        {phonePath === "A" ? "Call this number" : "Customers call this number"}
-                      </p>
-                      <p className="mt-2 text-2xl font-semibold tracking-tight">{customerFacingNumber || "Finish the phone setup first"}</p>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Call this number</p>
+                      <p className="mt-2 text-2xl font-semibold tracking-tight">{config.from_number || "Create the NexaOS number first"}</p>
                     </div>
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">NexaOS catches misses here</p>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">This cell should ring</p>
                       <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
-                        {config.from_number || "Provision the NexaOS number first"}
+                        {config.contractor_phone || normalizePhone(contractorPhone) || "Add your cell number first"}
                       </p>
                     </div>
                   </div>
@@ -814,7 +536,7 @@ export default function GoLive() {
                     <p className="text-sm text-slate-700">
                       {onboarding.test_call_started_at
                         ? "Listening for the missed call now. Keep this page open while you run the test."
-                        : "Start the test when the number setup above is done."}
+                        : "Start the test when your new NexaOS number is ready."}
                     </p>
                   </div>
                 )}
@@ -827,7 +549,7 @@ export default function GoLive() {
                     </Button>
                   )}
                   {onboarding.test_call_verified && (
-                    <Button className={primaryButtonClass} onClick={() => setCurrentStep(4)}>
+                    <Button className={primaryButtonClass} onClick={() => setCurrentStep(3)}>
                       Continue
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </Button>
@@ -836,7 +558,7 @@ export default function GoLive() {
               </div>
             )}
 
-            {currentStep === 4 && (
+            {currentStep === 3 && (
               <div className="space-y-6">
                 <div className="grid gap-4 lg:grid-cols-2">
                   <button
@@ -893,7 +615,7 @@ export default function GoLive() {
               </div>
             )}
 
-            {currentStep === 5 && (
+            {currentStep === 4 && (
               <div className="space-y-5">
                 <div className="space-y-2">
                   <Label htmlFor="google-review-link">Google review link</Label>
@@ -916,7 +638,7 @@ export default function GoLive() {
               </div>
             )}
 
-            {currentStep === 6 && (
+            {currentStep === 5 && (
               <div className="space-y-6">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
@@ -937,8 +659,8 @@ export default function GoLive() {
                   </div>
                   <div className="rounded-3xl border border-slate-200 bg-white p-5">
                     <ShieldCheck className="h-5 w-5 text-emerald-600" />
-                    <p className="mt-4 text-sm font-semibold text-slate-950">Phone flow</p>
-                    <p className="mt-2 text-sm text-slate-600">{phonePath === "A" ? "Direct to your cell" : "Forward missed calls only"}</p>
+                    <p className="mt-4 text-sm font-semibold text-slate-950">Rings this cell</p>
+                    <p className="mt-2 text-sm text-slate-600">{config.contractor_phone || "Pending"}</p>
                   </div>
                   <div className="rounded-3xl border border-slate-200 bg-white p-5">
                     <MessageSquare className="h-5 w-5 text-emerald-600" />

@@ -290,7 +290,6 @@ Deno.serve(async (req) => {
       await logEvent(supabase, workspace_id, "forwarding_test_verified", {
         call_sid: callSid,
         lead_id: lead.id,
-        phone_path: config.phone_path ?? "B",
       });
     }
 
@@ -326,7 +325,6 @@ Deno.serve(async (req) => {
             to: callerNumber,
             message_sid: smsResult.sid,
             template: "missed_call",
-            phone_path: config.phone_path ?? "B",
           });
         } catch (smsError: any) {
           await logEvent(supabase, workspace_id, "error", {

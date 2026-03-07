@@ -9,8 +9,6 @@ export interface TwilioConfig {
   provisioned_number_id: string;
   provisioning_scope: "local" | "state" | "fallback" | null;
   contractor_phone: string;
-  public_number: string;
-  phone_path: "A" | "B" | null;
   missed_call_sms: boolean;
   qualification_flow: boolean;
   auto_create_job: boolean;
@@ -31,8 +29,6 @@ const DEFAULT_CONFIG: TwilioConfig = {
   provisioned_number_id: "",
   provisioning_scope: null,
   contractor_phone: "",
-  public_number: "",
-  phone_path: null,
   missed_call_sms: true,
   qualification_flow: true,
   auto_create_job: true,
@@ -129,9 +125,7 @@ export function useAutomationConfig() {
   const provisionNumber = useMutation({
     mutationFn: async (payload: {
       preferred_area_code?: string;
-      phone_path: "A" | "B";
       contractor_phone?: string;
-      public_number?: string;
     }) => {
       if (!workspace) throw new Error("No workspace");
       const { data, error } = await supabase.functions.invoke("provision-number", {

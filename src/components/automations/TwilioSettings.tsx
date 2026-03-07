@@ -12,7 +12,7 @@ import { MessageSquare, Phone, Send } from "lucide-react";
 
 const statusLabel: Record<string, string> = {
   disconnected: "Not Provisioned",
-  provisioned: "Forwarding Pending",
+  provisioned: "Provisioned",
   connected: "Active",
 };
 
@@ -66,7 +66,7 @@ export function TwilioSettings() {
             </Badge>
           </div>
           <CardDescription>
-            NexaOS manages Twilio in the background. This page shows how calls are routed plus the SMS automation settings.
+            NexaOS manages Twilio in the background. This page shows the business number, where it rings, and the SMS automation settings.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -76,21 +76,7 @@ export function TwilioSettings() {
               <Input value={form.from_number || "Provision during onboarding"} disabled className="bg-muted/50" />
             </div>
             <div>
-              <Label>Phone path</Label>
-              <Input
-                value={form.phone_path === "A" ? "Path A: personal cell" : form.phone_path === "B" ? "Path B: business line" : "Pending"}
-                disabled
-                className="bg-muted/50"
-              />
-            </div>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <Label>Customer-facing number</Label>
-              <Input value={form.public_number || "Set during onboarding"} disabled className="bg-muted/50" />
-            </div>
-            <div>
-              <Label>Contractor mobile</Label>
+              <Label>Contractor cell</Label>
               <Input value={form.contractor_phone || "Set during onboarding"} disabled className="bg-muted/50" />
             </div>
           </div>
@@ -105,7 +91,7 @@ export function TwilioSettings() {
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Path A uses the NexaOS number publicly. Path B keeps the public number and forwards missed calls to NexaOS.
+            Customers call the NexaOS number directly. The contractor's cell rings, and missed calls fall into the SMS automation.
           </p>
         </CardContent>
       </Card>
@@ -118,7 +104,7 @@ export function TwilioSettings() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-foreground">Missed Call SMS</p>
-              <p className="text-xs text-muted-foreground">Auto-send a text when the contractor misses a forwarded call</p>
+              <p className="text-xs text-muted-foreground">Auto-send a text when the contractor misses a live call to the NexaOS number</p>
             </div>
             <Switch checked={form.missed_call_sms} onCheckedChange={(value) => handleChange("missed_call_sms", value)} />
           </div>

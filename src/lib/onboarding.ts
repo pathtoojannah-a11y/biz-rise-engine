@@ -1,7 +1,6 @@
 import { Json } from "@/integrations/supabase/types";
 
 export type ProvisioningScope = "local" | "state" | "fallback";
-export type PhonePath = "A" | "B";
 
 export interface OnboardingChecklist {
   workspace_created: boolean;

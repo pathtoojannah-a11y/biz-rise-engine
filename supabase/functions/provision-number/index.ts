@@ -7,7 +7,6 @@ const corsHeaders = {
 };
 
 type ProvisioningScope = "local" | "state" | "fallback";
-type PhonePath = "A" | "B";
 
 function getServiceClient() {
   return createClient(
@@ -52,13 +51,6 @@ function getTwilioAuthHeader() {
   };
 }
 
-function buildVoiceUrl(webhookBaseUrl: string, phonePath: PhonePath) {
-  if (phonePath === "A") {
-    return `${webhookBaseUrl}/twilio-voice-handler`;
-  }
-  return `${webhookBaseUrl}/twilio-voice-status?mode=answer`;
-}
-
 async function lookupState(zipCode: string) {
   try {
     const response = await fetch(`https://api.zippopotam.us/us/${zipCode}`);
@@ -97,13 +89,12 @@ async function purchaseNumber(
   phoneNumber: string,
   friendlyName: string,
   webhookBaseUrl: string,
-  phonePath: PhonePath,
 ) {
   const accountSid = Deno.env.get("TWILIO_MASTER_ACCOUNT_SID");
   const params = new URLSearchParams({
     PhoneNumber: phoneNumber,
     FriendlyName: friendlyName,
-    VoiceUrl: buildVoiceUrl(webhookBaseUrl, phonePath),
+    VoiceUrl: `${webhookBaseUrl}/twilio-voice-handler`,
     VoiceMethod: "POST",
     StatusCallback: `${webhookBaseUrl}/twilio-voice-status`,
     StatusCallbackMethod: "POST",
@@ -166,9 +157,7 @@ Deno.serve(async (req) => {
     const {
       workspace_id,
       preferred_area_code,
-      phone_path,
       contractor_phone,
-      public_number,
     } = await req.json();
 
     if (!workspace_id) {
@@ -178,25 +167,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    if (phone_path !== "A" && phone_path !== "B") {
-      return new Response(JSON.stringify({ error: "Choose whether customers call your cell or a separate business line first." }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     const normalizedContractorPhone = normalizePhone(contractor_phone);
-    const normalizedPublicNumber = normalizePhone(public_number);
 
     if (!normalizedContractorPhone) {
       return new Response(JSON.stringify({ error: "Add the mobile number NexaOS should ring and text." }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (phone_path === "B" && !normalizedPublicNumber) {
-      return new Response(JSON.stringify({ error: "Add the public business number customers already call." }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -253,11 +227,7 @@ Deno.serve(async (req) => {
           provisioned_number_id: existingNumber.id,
           status: existingIntegration?.status ?? existingNumber.status,
           provisioning_scope: existingConfig.provisioning_scope ?? "fallback",
-          phone_path: existingConfig.phone_path ?? phone_path,
           contractor_phone: existingConfig.contractor_phone ?? normalizedContractorPhone,
-          public_number:
-            existingConfig.public_number ??
-            (phone_path === "A" ? existingNumber.phone_number : normalizedPublicNumber),
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
@@ -305,7 +275,6 @@ Deno.serve(async (req) => {
       phoneNumber,
       `${workspace.name} Recovery Line`,
       webhookBaseUrl,
-      phone_path,
     );
 
     const { data: insertedNumber, error: insertError } = await supabase
@@ -330,8 +299,6 @@ Deno.serve(async (req) => {
       provisioned_number_id: insertedNumber.id,
       provisioning_scope: provisioningScope,
       contractor_phone: normalizedContractorPhone,
-      public_number: phone_path === "A" ? purchased.phone_number : normalizedPublicNumber,
-      phone_path,
       review_delay_days:
         Number((existingIntegration?.config as Record<string, unknown> | null)?.review_delay_days ?? 2) || 2,
     };
@@ -377,7 +344,7 @@ Deno.serve(async (req) => {
       ...rawOnboarding,
       provisioned_number_id: insertedNumber.id,
       provisioning_scope: provisioningScope,
-      forwarding_pending: phone_path === "B",
+      forwarding_pending: false,
       test_call_verified: false,
       test_call_verified_at: null,
       test_call_started_at: null,
@@ -400,9 +367,7 @@ Deno.serve(async (req) => {
         provisioned_number_id: insertedNumber.id,
         status: "provisioned",
         provisioning_scope: provisioningScope,
-        phone_path,
         contractor_phone: normalizedContractorPhone,
-        public_number: mergedConfig.public_number,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
