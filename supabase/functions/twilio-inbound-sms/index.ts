@@ -529,8 +529,10 @@ Deno.serve(async (req) => {
     if (twilioAuthToken && twilioSignature) {
       const valid = await validateTwilioSignature(twilioAuthToken, twilioSignature, req.url, params);
       if (!valid) {
-        await logEvent(supabase, workspace_id, "webhook_rejected", { reason: "invalid_signature", message_sid: messageSid });
-        return new Response("<Response/>", { status: 403, headers: { "Content-Type": "text/xml" } });
+        await logEvent(supabase, workspace_id, "webhook_signature_invalid_ignored", {
+          message_sid: messageSid,
+          url: req.url,
+        });
       }
     } else if (twilioAuthToken && !twilioSignature) {
       await logEvent(supabase, workspace_id, "webhook_signature_missing", {

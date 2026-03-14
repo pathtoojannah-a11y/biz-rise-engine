@@ -40,7 +40,7 @@ const STEP_LABELS = [
 const STEP_DESCRIPTIONS = [
   "Check the business details NexaOS will use for launch.",
   "Enter the cell number NexaOS should ring, then create your new business number.",
-  "Text your NexaOS number from your saved cell so NexaOS can verify the SMS path.",
+  "Start the check, then text your NexaOS number from your saved cell so NexaOS can verify the SMS path.",
   "Decide whether qualified leads should get a booking link by text.",
   "Paste your Google review link. High ratings go public. Low ratings stay private.",
   "Set reminder hours, finish setup, and unlock the workspace.",
@@ -513,9 +513,9 @@ export default function GoLive() {
                 <div className="rounded-3xl border border-slate-200 bg-white p-6">
                   <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Verify by text</p>
                   <ol className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
-                    <li>1. Open the text app on the saved cell number.</li>
-                    <li>2. Text your NexaOS number. Send something short like hello.</li>
-                    <li>3. NexaOS replies and marks this step complete automatically.</li>
+                    <li>1. Click <span className="font-semibold">Start SMS check</span>.</li>
+                    <li>2. From your saved cell, text your NexaOS number. Send something short like <span className="font-semibold">hello</span>.</li>
+                    <li>3. NexaOS replies and this step switches to verified automatically.</li>
                   </ol>
 
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -546,18 +546,26 @@ export default function GoLive() {
                   <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
                     <p className="text-sm text-slate-700">
                       {onboarding.test_call_started_at
-                        ? "Waiting for your text now. Keep this page open after you message the NexaOS number."
-                        : "Start the SMS verification when your new NexaOS number is ready."}
+                        ? "SMS check started. Send the text now from your saved cell, then keep this page open."
+                        : "Start the check first, then send a text to your NexaOS number."}
                     </p>
                   </div>
                 )}
 
                 <div className="flex justify-end gap-3">
                   {!onboarding.test_call_verified && (
-                    <Button className={primaryButtonClass} onClick={handleStartTest} disabled={!config.from_number || startingTest}>
-                      {startingTest ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageSquare className="mr-2 h-4 w-4" />}
-                      {onboarding.test_call_started_at ? "Retry SMS check" : "Start SMS check"}
-                    </Button>
+                    <>
+                      {onboarding.test_call_started_at && (
+                        <Button variant="outline" disabled>
+                          <MessageSquare className="mr-2 h-4 w-4" />
+                          Text sent? Waiting for reply
+                        </Button>
+                      )}
+                      <Button className={primaryButtonClass} onClick={handleStartTest} disabled={!config.from_number || startingTest}>
+                        {startingTest ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageSquare className="mr-2 h-4 w-4" />}
+                        {onboarding.test_call_started_at ? "Restart SMS check" : "Start SMS check"}
+                      </Button>
+                    </>
                   )}
                   {onboarding.test_call_verified && (
                     <Button className={primaryButtonClass} onClick={() => setCurrentStep(3)}>
