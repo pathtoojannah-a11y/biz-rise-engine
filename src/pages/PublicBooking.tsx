@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { CalendarDays, CheckCircle2, Clock3, Loader2, Phone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,19 @@ interface LoadResponse {
   slot_groups: BookingSlotGroup[];
 }
 
+function formatServiceVisit(service: string | null) {
+  const normalized = (service || "").trim().toLowerCase();
+  if (!normalized) return "";
+  if (normalized === "repair") return "Repair · Service Visit";
+  if (normalized === "tune-up") return "Tune-up · Service Visit";
+  if (normalized === "install") return "Install · Service Visit";
+  return `${normalized
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")} · Service Visit`;
+}
+
 function normalizePhone(value: string) {
   const digits = value.replace(/\D/g, "");
   if (digits.length === 10) return `+1${digits}`;
@@ -51,6 +64,7 @@ function formatPhoneInput(value: string) {
 
 export default function PublicBooking() {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const [searchParams] = useSearchParams();
   const [bookingData, setBookingData] = useState<LoadResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +124,7 @@ export default function PublicBooking() {
     }
     return "";
   })();
+  const serviceVisitLabel = formatServiceVisit(searchParams.get("service"));
 
   const handleBook = async () => {
     if (!bookingData) return;
@@ -202,7 +217,7 @@ export default function PublicBooking() {
             <div>
               <CardTitle className="text-4xl tracking-[-0.05em] text-slate-950">{bookingData.workspace_name}</CardTitle>
               <CardDescription className="mt-3 max-w-xl text-base leading-7 text-slate-600">
-                Pick the time that works best for your service request. NexaOS will lock it in and send it straight to the business.
+                Book your technician visit. Once the tech sees the issue, they will walk you through the full scope and next steps.
               </CardDescription>
             </div>
           </CardHeader>
@@ -232,7 +247,7 @@ export default function PublicBooking() {
                   <div>
                     <p className="text-lg font-semibold text-emerald-950">Booking confirmed</p>
                     <p className="mt-2 text-sm leading-6 text-emerald-900">
-                      {confirmation.customerName}, you're booked for {confirmation.scheduledAt}. The business will see this in NexaOS right away.
+                      {confirmation.customerName}, you're booked for {confirmation.scheduledAt}. A technician will visit to diagnose and assess. If parts or additional work are needed, they will go over it with you on-site.
                     </p>
                   </div>
                 </div>
@@ -249,9 +264,14 @@ export default function PublicBooking() {
 
         <Card className="border-slate-200 bg-white/95 shadow-xl shadow-emerald-100/60">
           <CardHeader>
+            {serviceVisitLabel && (
+              <div className="inline-flex w-fit items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-800">
+                {serviceVisitLabel}
+              </div>
+            )}
             <CardTitle className="text-3xl tracking-[-0.04em] text-slate-950">Choose a time</CardTitle>
             <CardDescription className="text-base text-slate-600">
-              Appointment length: {bookingData.booking_settings.duration_minutes} minutes
+              First visit · up to {bookingData.booking_settings.duration_minutes} min
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">

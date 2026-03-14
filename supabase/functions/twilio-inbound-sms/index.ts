@@ -47,6 +47,15 @@ function urgencyLabel(raw: string) {
   return raw || "unspecified urgency";
 }
 
+function normalizeServiceTypeForBooking(raw: string) {
+  const value = raw.trim().toLowerCase();
+  if (!value) return "";
+  if (value.includes("repair")) return "repair";
+  if (value.includes("tune")) return "tune-up";
+  if (value.includes("install")) return "install";
+  return value.replace(/\s+/g, "-");
+}
+
 async function resolveWorkspace(supabase: any, toNumber: string) {
   const normalized = toNumber.replace(/\D/g, "");
   const { data: integrations } = await supabase
@@ -713,8 +722,15 @@ Deno.serve(async (req) => {
         }
       }
 
-      const customerMessage = config.booking_link
-        ? `Book a time that works for you: ${config.booking_link}`
+      const bookingLink =
+        config.booking_link && config.booking_mode === "nexaos"
+          ? `${config.booking_link}${String(config.booking_link).includes("?") ? "&" : "?"}service=${encodeURIComponent(
+              normalizeServiceTypeForBooking(String(updatedAnswers.service_type || "")),
+            )}`
+          : config.booking_link;
+
+      const customerMessage = bookingLink
+        ? `Book a time that works for you: ${bookingLink}`
         : `Got it! Someone from ${workspace?.name || "the team"} will contact you shortly.`;
 
       try {
