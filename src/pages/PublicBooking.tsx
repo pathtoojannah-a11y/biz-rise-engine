@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { CalendarDays, CheckCircle2, Clock3, Loader2, Phone } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -7,23 +7,26 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-interface BookingSlot {
+interface BookingWindow {
+  key: string;
   label: string;
+  range_label: string;
   value: string;
+  scheduled_at: string;
 }
 
-interface BookingSlotGroup {
+interface BookingWindowGroup {
   day_label: string;
   date_value: string;
-  slots: BookingSlot[];
+  windows: BookingWindow[];
 }
 
 interface BookingSettings {
-  duration_minutes: number;
-  buffer_minutes: number;
   timezone: string;
   start_time: string;
   end_time: string;
+  work_days: string[];
+  jobs_per_day: number;
 }
 
 interface LoadResponse {
@@ -32,20 +35,17 @@ interface LoadResponse {
   industry: string | null;
   booking_link: string;
   booking_settings: BookingSettings;
-  slot_groups: BookingSlotGroup[];
+  window_groups: BookingWindowGroup[];
 }
 
 function formatServiceVisit(service: string | null) {
   const normalized = (service || "").trim().toLowerCase();
   if (!normalized) return "";
-  if (normalized === "repair") return "Repair · Service Visit";
-  if (normalized === "tune-up") return "Tune-up · Service Visit";
-  if (normalized === "install") return "Install · Service Visit";
   return `${normalized
     .split("-")
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ")} · Service Visit`;
+    .join(" ")} | Service Visit`;
 }
 
 function normalizePhone(value: string) {
@@ -68,11 +68,11 @@ export default function PublicBooking() {
   const [bookingData, setBookingData] = useState<LoadResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedSlot, setSelectedSlot] = useState<string>("");
+  const [selectedWindow, setSelectedWindow] = useState<string>("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [saving, setSaving] = useState(false);
-  const [confirmation, setConfirmation] = useState<{ customerName: string; scheduledAt: string } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ customerName: string; requestedWindow: string } | null>(null);
 
   useEffect(() => {
     if (!workspaceSlug) {
@@ -116,20 +116,21 @@ export default function PublicBooking() {
     };
   }, [workspaceSlug]);
 
-  const selectedSlotLabel = (() => {
-    if (!selectedSlot || !bookingData) return "";
-    for (const group of bookingData.slot_groups) {
-      const match = group.slots.find((slot) => slot.value === selectedSlot);
-      if (match) return `${group.day_label} at ${match.label}`;
+  const selectedWindowSummary = useMemo(() => {
+    if (!selectedWindow || !bookingData) return "";
+    for (const group of bookingData.window_groups) {
+      const match = group.windows.find((window) => window.value === selectedWindow);
+      if (match) return `${group.day_label}, ${match.label} (${match.range_label})`;
     }
     return "";
-  })();
+  }, [selectedWindow, bookingData]);
+
   const serviceVisitLabel = formatServiceVisit(searchParams.get("service"));
 
   const handleBook = async () => {
     if (!bookingData) return;
-    if (!selectedSlot) {
-      setError("Choose a time slot first.");
+    if (!selectedWindow) {
+      setError("Choose a service window first.");
       return;
     }
     if (!customerName.trim()) {
@@ -150,14 +151,15 @@ export default function PublicBooking() {
         slug: bookingData.workspace_slug,
         customer_name: customerName.trim(),
         customer_phone: normalizePhone(customerPhone),
-        scheduled_at: selectedSlot,
+        window_value: selectedWindow,
+        service_type: searchParams.get("service"),
       },
     });
 
     setSaving(false);
 
     if (invokeError) {
-      setError(invokeError.message || "Could not save the booking.");
+      setError(invokeError.message || "Could not save the booking request.");
       return;
     }
 
@@ -166,9 +168,13 @@ export default function PublicBooking() {
       return;
     }
 
+    const requestedWindow = data?.requested_window
+      ? `${data.requested_window.day_label}, ${data.requested_window.label} (${data.requested_window.range_label})`
+      : selectedWindowSummary;
+
     setConfirmation({
       customerName: customerName.trim(),
-      scheduledAt: selectedSlotLabel,
+      requestedWindow,
     });
   };
 
@@ -217,7 +223,7 @@ export default function PublicBooking() {
             <div>
               <CardTitle className="text-4xl tracking-[-0.05em] text-slate-950">{bookingData.workspace_name}</CardTitle>
               <CardDescription className="mt-3 max-w-xl text-base leading-7 text-slate-600">
-                Book your technician visit. Once the tech sees the issue, they will walk you through the full scope and next steps.
+                Book your technician visit. Choose the window that works best and the contractor will confirm the exact arrival time.
               </CardDescription>
             </div>
           </CardHeader>
@@ -225,18 +231,18 @@ export default function PublicBooking() {
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-4">
                 <CalendarDays className="h-5 w-5 text-emerald-600" />
-                <p className="mt-3 text-sm font-semibold text-slate-950">Real time slots</p>
-                <p className="mt-1 text-sm text-slate-600">Choose an actual appointment time instead of waiting for a callback.</p>
+                <p className="mt-3 text-sm font-semibold text-slate-950">Choose a window</p>
+                <p className="mt-1 text-sm text-slate-600">Pick the morning, midday, or afternoon window that fits best.</p>
               </div>
               <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-4">
                 <Clock3 className="h-5 w-5 text-emerald-600" />
-                <p className="mt-3 text-sm font-semibold text-slate-950">Timezone aware</p>
-                <p className="mt-1 text-sm text-slate-600">{bookingData.booking_settings.timezone}</p>
+                <p className="mt-3 text-sm font-semibold text-slate-950">First visit only</p>
+                <p className="mt-1 text-sm text-slate-600">The technician will assess the issue and confirm the full scope on-site.</p>
               </div>
               <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-4">
                 <Phone className="h-5 w-5 text-emerald-600" />
                 <p className="mt-3 text-sm font-semibold text-slate-950">Fast follow-up</p>
-                <p className="mt-1 text-sm text-slate-600">Your booking goes straight into the contractor's NexaOS workflow.</p>
+                <p className="mt-1 text-sm text-slate-600">Your request goes straight into the contractor's NexaOS workflow.</p>
               </div>
             </div>
 
@@ -245,9 +251,9 @@ export default function PublicBooking() {
                 <div className="flex items-start gap-3">
                   <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-600" />
                   <div>
-                    <p className="text-lg font-semibold text-emerald-950">Booking confirmed</p>
+                    <p className="text-lg font-semibold text-emerald-950">Booking request received</p>
                     <p className="mt-2 text-sm leading-6 text-emerald-900">
-                      {confirmation.customerName}, you're booked for {confirmation.scheduledAt}. A technician will visit to diagnose and assess. If parts or additional work are needed, they will go over it with you on-site.
+                      {confirmation.customerName}, your technician visit request is in for {confirmation.requestedWindow}. The contractor will confirm the exact arrival time with you directly.
                     </p>
                   </div>
                 </div>
@@ -255,7 +261,7 @@ export default function PublicBooking() {
             ) : (
               <div className="rounded-3xl border border-slate-200 bg-white p-5">
                 <p className="text-sm text-slate-600">
-                  Choose a slot, enter your contact details, and submit the booking in one step.
+                  Choose a service window, enter your contact details, and submit your request in one step.
                 </p>
               </div>
             )}
@@ -269,29 +275,30 @@ export default function PublicBooking() {
                 {serviceVisitLabel}
               </div>
             )}
-            <CardTitle className="text-3xl tracking-[-0.04em] text-slate-950">Choose a time</CardTitle>
+            <CardTitle className="text-3xl tracking-[-0.04em] text-slate-950">Choose a service window</CardTitle>
             <CardDescription className="text-base text-slate-600">
-              First visit · up to {bookingData.booking_settings.duration_minutes} min
+              Preferred visit window | The contractor confirms the exact time afterward
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-4">
-              {bookingData.slot_groups.map((group) => (
+              {bookingData.window_groups.map((group) => (
                 <div key={group.date_value} className="space-y-3">
                   <p className="text-sm font-semibold uppercase tracking-[0.16em] text-slate-500">{group.day_label}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {group.slots.map((slot) => (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {group.windows.map((window) => (
                       <button
-                        key={slot.value}
+                        key={window.value}
                         type="button"
-                        onClick={() => setSelectedSlot(slot.value)}
-                        className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
-                          selectedSlot === slot.value
+                        onClick={() => setSelectedWindow(window.value)}
+                        className={`rounded-2xl border px-4 py-4 text-left transition ${
+                          selectedWindow === window.value
                             ? "border-emerald-500 bg-emerald-100 text-emerald-950"
                             : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
                         }`}
                       >
-                        {slot.label}
+                        <p className="text-sm font-semibold">{window.label}</p>
+                        <p className="mt-1 text-sm opacity-80">{window.range_label}</p>
                       </button>
                     ))}
                   </div>
@@ -334,7 +341,7 @@ export default function PublicBooking() {
                 disabled={saving || !!confirmation}
               >
                 {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Confirm booking
+                Request this window
               </Button>
             </div>
           </CardContent>

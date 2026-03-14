@@ -12,11 +12,11 @@ export interface TwilioConfig {
   booking_mode: "external" | "nexaos" | null;
   booking_provider: "calendly" | "jobber" | "housecall-pro" | "other" | null;
   booking_settings: {
-    duration_minutes: number;
-    buffer_minutes: number;
     timezone: string;
     start_time: string;
     end_time: string;
+    work_days: string[];
+    jobs_per_day: number;
   };
   missed_call_sms: boolean;
   qualification_flow: boolean;
@@ -41,11 +41,11 @@ const DEFAULT_CONFIG: TwilioConfig = {
   booking_mode: null,
   booking_provider: null,
   booking_settings: {
-    duration_minutes: 60,
-    buffer_minutes: 15,
     timezone: "America/New_York",
     start_time: "08:00",
     end_time: "18:00",
+    work_days: ["mon", "tue", "wed", "thu", "fri"],
+    jobs_per_day: 3,
   },
   missed_call_sms: true,
   qualification_flow: true,
@@ -103,6 +103,10 @@ export function useAutomationConfig() {
       const merged = {
         ...config,
         ...newConfig,
+        booking_settings: {
+          ...config.booking_settings,
+          ...(newConfig.booking_settings || {}),
+        },
         office_hours: {
           ...config.office_hours,
           ...(newConfig.office_hours || {}),

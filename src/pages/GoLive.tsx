@@ -30,12 +30,23 @@ import { toast } from "sonner";
 
 type BookingChoice = "external" | "nexaos" | null;
 type BookingProvider = "calendly" | "jobber" | "housecall-pro" | "other";
+type WorkDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 
 const BOOKING_PROVIDERS: { value: BookingProvider; label: string }[] = [
   { value: "calendly", label: "Calendly" },
   { value: "jobber", label: "Jobber" },
   { value: "housecall-pro", label: "Housecall Pro" },
   { value: "other", label: "Other" },
+];
+
+const WORK_DAYS: { value: WorkDay; label: string }[] = [
+  { value: "mon", label: "Mon" },
+  { value: "tue", label: "Tue" },
+  { value: "wed", label: "Wed" },
+  { value: "thu", label: "Thu" },
+  { value: "fri", label: "Fri" },
+  { value: "sat", label: "Sat" },
+  { value: "sun", label: "Sun" },
 ];
 
 const STEP_LABELS = [
@@ -51,7 +62,7 @@ const STEP_DESCRIPTIONS = [
   "Check the business details NexaOS will use for launch.",
   "Enter the cell number NexaOS should ring, then create your new business number.",
   "Start the check, then text your NexaOS number from your saved cell so NexaOS can verify the SMS path.",
-  "Add the booking link NexaOS should send after qualification, or create a NexaOS booking page now.",
+  "Choose an existing booking link or set the days, hours, and job windows NexaOS should offer.",
   "Paste your Google review link. High ratings go public. Low ratings stay private.",
   "Set reminder hours, finish setup, and unlock the workspace.",
 ];
@@ -100,6 +111,16 @@ function isValidBookingUrl(value: string) {
 
 function getPublicAppUrl() {
   return (import.meta.env.VITE_APP_URL as string | undefined)?.trim() || window.location.origin;
+}
+
+function normalizeWorkDays(value: unknown): WorkDay[] {
+  if (!Array.isArray(value)) return ["mon", "tue", "wed", "thu", "fri"];
+
+  const days = value.filter((item): item is WorkDay =>
+    typeof item === "string" && WORK_DAYS.some((day) => day.value === item),
+  );
+
+  return days.length > 0 ? days : ["mon", "tue", "wed", "thu", "fri"];
 }
 
 function getProvisioningErrorMessage(error: unknown) {
@@ -160,8 +181,6 @@ export default function GoLive() {
     config.booking_provider ?? getBookingProviderFromLink(config.booking_link || ""),
   );
   const [bookingLink, setBookingLink] = useState(config.booking_link || "");
-  const [bookingDuration, setBookingDuration] = useState(String(config.booking_settings.duration_minutes || 60));
-  const [bookingBuffer, setBookingBuffer] = useState(String(config.booking_settings.buffer_minutes || 15));
   const [bookingTimezone, setBookingTimezone] = useState(config.booking_settings.timezone || workspace?.timezone || "America/New_York");
   const [bookingStart, setBookingStart] = useState(
     config.booking_settings.start_time || onboarding.office_open || config.office_hours.start || "08:00",
@@ -169,6 +188,8 @@ export default function GoLive() {
   const [bookingEnd, setBookingEnd] = useState(
     config.booking_settings.end_time || onboarding.office_close || config.office_hours.end || "18:00",
   );
+  const [bookingDays, setBookingDays] = useState<WorkDay[]>(normalizeWorkDays(config.booking_settings.work_days));
+  const [jobsPerDay, setJobsPerDay] = useState(String(config.booking_settings.jobs_per_day || 3));
   const [reviewLink, setReviewLink] = useState(existingReviewLink);
   const [officeStart, setOfficeStart] = useState(onboarding.office_open || config.office_hours.start || "08:00");
   const [officeEnd, setOfficeEnd] = useState(onboarding.office_close || config.office_hours.end || "18:00");
@@ -182,6 +203,12 @@ export default function GoLive() {
   const primaryButtonClass =
     "bg-emerald-600 text-white hover:bg-emerald-700 shadow-[0_18px_40px_-24px_rgba(5,150,105,0.8)]";
 
+  const toggleBookingDay = (day: WorkDay) => {
+    setBookingDays((current) =>
+      current.includes(day) ? current.filter((item) => item !== day) : [...current, day],
+    );
+  };
+
   useEffect(() => {
     setCurrentStep((previous) => (recommendedStep > previous ? recommendedStep : previous));
   }, [recommendedStep]);
@@ -191,21 +218,21 @@ export default function GoLive() {
     setBookingChoice(config.booking_mode ?? (config.booking_link ? "external" : null));
     setBookingProvider(config.booking_provider ?? getBookingProviderFromLink(config.booking_link || ""));
     setBookingLink(config.booking_link || "");
-    setBookingDuration(String(config.booking_settings.duration_minutes || 60));
-    setBookingBuffer(String(config.booking_settings.buffer_minutes || 15));
     setBookingTimezone(config.booking_settings.timezone || workspace?.timezone || "America/New_York");
     setBookingStart(config.booking_settings.start_time || onboarding.office_open || config.office_hours.start || "08:00");
     setBookingEnd(config.booking_settings.end_time || onboarding.office_close || config.office_hours.end || "18:00");
+    setBookingDays(normalizeWorkDays(config.booking_settings.work_days));
+    setJobsPerDay(String(config.booking_settings.jobs_per_day || 3));
   }, [
     config.contractor_phone,
     config.booking_mode,
     config.booking_provider,
     config.booking_link,
-    config.booking_settings.duration_minutes,
-    config.booking_settings.buffer_minutes,
     config.booking_settings.timezone,
     config.booking_settings.start_time,
     config.booking_settings.end_time,
+    config.booking_settings.work_days,
+    config.booking_settings.jobs_per_day,
     onboarding.office_open,
     onboarding.office_close,
     config.office_hours.start,
@@ -339,19 +366,18 @@ export default function GoLive() {
           booking_link: bookingLink.trim(),
         });
       } else {
-        const durationMinutes = Number(bookingDuration);
-        const bufferMinutes = Number(bookingBuffer);
+        const parsedJobsPerDay = Number(jobsPerDay);
 
-        if (!Number.isFinite(durationMinutes) || durationMinutes < 15) {
-          toast.error("Set an appointment length of at least 15 minutes.");
-          return;
-        }
-        if (!Number.isFinite(bufferMinutes) || bufferMinutes < 0) {
-          toast.error("Set a valid buffer between appointments.");
+        if (bookingDays.length === 0) {
+          toast.error("Choose at least one work day.");
           return;
         }
         if (!bookingStart || !bookingEnd || bookingStart >= bookingEnd) {
-          toast.error("Set a valid booking window.");
+          toast.error("Set a valid work day schedule.");
+          return;
+        }
+        if (!Number.isFinite(parsedJobsPerDay) || parsedJobsPerDay < 1) {
+          toast.error("Choose how many jobs you can take in a day.");
           return;
         }
 
@@ -361,11 +387,11 @@ export default function GoLive() {
           booking_provider: "other",
           booking_link: generatedBookingLink,
           booking_settings: {
-            duration_minutes: durationMinutes,
-            buffer_minutes: bufferMinutes,
             timezone: bookingTimezone || workspace.timezone || "America/New_York",
             start_time: bookingStart,
             end_time: bookingEnd,
+            work_days: bookingDays,
+            jobs_per_day: Math.min(parsedJobsPerDay, 5),
           },
         });
         setBookingLink(generatedBookingLink);
@@ -714,7 +740,7 @@ export default function GoLive() {
                     <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">NexaOS link</p>
                     <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Create my NexaOS booking link</h3>
                     <p className="mt-3 text-sm leading-6 text-slate-600">
-                      Create a NexaOS-hosted booking page so customers can pick a real appointment time right after qualification.
+                      Set the days, hours, and job windows you want to offer. NexaOS will capture the preferred window and you confirm the exact time later.
                     </p>
                   </button>
                 </div>
@@ -760,35 +786,35 @@ export default function GoLive() {
                   <div className="space-y-5 rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-5">
                     <div>
                       <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">NexaOS booking page</p>
-                      <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Set the booking rules once</h3>
+                      <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Set your availability once</h3>
                       <p className="mt-2 text-sm leading-6 text-slate-600">
-                        NexaOS will generate a hosted booking page and send it after qualification so customers can pick a real time slot.
+                        Contractors do not need dispatch software here. Tell NexaOS which days you work, your normal hours, and how many jobs you can usually take.
                       </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Which days do you work?</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {WORK_DAYS.map((day) => (
+                          <button
+                            key={day.value}
+                            type="button"
+                            onClick={() => toggleBookingDay(day.value)}
+                            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                              bookingDays.includes(day.value)
+                                ? "border-emerald-500 bg-emerald-100 text-emerald-950"
+                                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                            }`}
+                          >
+                            {day.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
-                        <Label htmlFor="booking-duration">Appointment length</Label>
-                        <Input
-                          id="booking-duration"
-                          inputMode="numeric"
-                          value={bookingDuration}
-                          onChange={(event) => setBookingDuration(event.target.value.replace(/[^\d]/g, ""))}
-                          placeholder="60"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="booking-buffer">Buffer between appointments</Label>
-                        <Input
-                          id="booking-buffer"
-                          inputMode="numeric"
-                          value={bookingBuffer}
-                          onChange={(event) => setBookingBuffer(event.target.value.replace(/[^\d]/g, ""))}
-                          placeholder="15"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="booking-start">Booking window start</Label>
+                        <Label htmlFor="booking-start">Start time</Label>
                         <Input
                           id="booking-start"
                           type="time"
@@ -797,13 +823,35 @@ export default function GoLive() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="booking-end">Booking window end</Label>
+                        <Label htmlFor="booking-end">End time</Label>
                         <Input
                           id="booking-end"
                           type="time"
                           value={bookingEnd}
                           onChange={(event) => setBookingEnd(event.target.value)}
                         />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>How many jobs can you usually take in a day?</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {["1", "2", "3", "4", "5"].map((value) => (
+                            <button
+                              key={value}
+                              type="button"
+                              onClick={() => setJobsPerDay(value)}
+                              className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                                jobsPerDay === value
+                                  ? "border-emerald-500 bg-emerald-100 text-emerald-950"
+                                  : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                              }`}
+                            >
+                              {value === "5" ? "5+" : value}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-sm text-slate-500">
+                          NexaOS turns this into simple morning, midday, and afternoon windows instead of rigid time slots.
+                        </p>
                       </div>
                       <div className="space-y-2 md:col-span-2">
                         <Label htmlFor="booking-timezone">Timezone</Label>
@@ -819,6 +867,9 @@ export default function GoLive() {
                     <div className="rounded-2xl border border-emerald-200 bg-white px-4 py-4">
                       <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Generated NexaOS booking link</p>
                       <p className="mt-2 break-all text-base font-semibold text-slate-950">{`${getPublicAppUrl()}/book/${workspace.slug}`}</p>
+                      <p className="mt-2 text-sm text-slate-600">
+                        Customers will choose a preferred service window. You can confirm the exact arrival time afterward.
+                      </p>
                     </div>
                   </div>
                 )}

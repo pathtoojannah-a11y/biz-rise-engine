@@ -6,6 +6,30 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+type WorkDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+type BookingSettings = {
+  timezone: string;
+  start_time: string;
+  end_time: string;
+  work_days: WorkDay[];
+  jobs_per_day: number;
+};
+
+type BookingWindow = {
+  key: string;
+  label: string;
+  range_label: string;
+  value: string;
+  scheduled_at: string;
+};
+
+type BookingWindowGroup = {
+  day_label: string;
+  date_value: string;
+  windows: BookingWindow[];
+};
+
 function getServiceClient() {
   return createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -25,6 +49,16 @@ function parseTimeToMinutes(value: string) {
   return hour * 60 + minute;
 }
 
+function formatMinutes(minutes: number) {
+  const normalized = Math.max(0, Math.min(minutes, 24 * 60));
+  const hour24 = Math.floor(normalized / 60);
+  const minute = normalized % 60;
+  const suffix = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 || 12;
+  if (minute === 0) return `${hour12}${suffix.toLowerCase()}`;
+  return `${hour12}:${String(minute).padStart(2, "0")}${suffix.toLowerCase()}`;
+}
+
 function getTimeZoneParts(date: Date, timeZone: string) {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone,
@@ -35,6 +69,7 @@ function getTimeZoneParts(date: Date, timeZone: string) {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+    weekday: "short",
   });
 
   const values = Object.fromEntries(
@@ -48,6 +83,7 @@ function getTimeZoneParts(date: Date, timeZone: string) {
     hour: Number(values.hour),
     minute: Number(values.minute),
     second: Number(values.second),
+    weekday: String(values.weekday || "").toLowerCase(),
   };
 }
 
@@ -77,7 +113,17 @@ function zonedDateTimeToUtc(
   return new Date(initialGuess - offset);
 }
 
-function buildBookingSettings(config: Record<string, unknown>, fallbackTimezone: string | null) {
+function normalizeWorkDays(value: unknown): WorkDay[] {
+  if (!Array.isArray(value)) return ["mon", "tue", "wed", "thu", "fri"];
+
+  const validDays = value.filter((item): item is WorkDay =>
+    typeof item === "string" && ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].includes(item),
+  );
+
+  return validDays.length > 0 ? validDays : ["mon", "tue", "wed", "thu", "fri"];
+}
+
+function buildBookingSettings(config: Record<string, unknown>, fallbackTimezone: string | null): BookingSettings {
   const officeHours =
     config.office_hours && typeof config.office_hours === "object" && !Array.isArray(config.office_hours)
       ? (config.office_hours as Record<string, unknown>)
@@ -87,29 +133,86 @@ function buildBookingSettings(config: Record<string, unknown>, fallbackTimezone:
       ? (config.booking_settings as Record<string, unknown>)
       : {};
 
+  const timezone = String(bookingSettings.timezone ?? fallbackTimezone ?? "America/New_York");
+  const start_time = String(bookingSettings.start_time ?? officeHours.start ?? "08:00");
+  const end_time = String(bookingSettings.end_time ?? officeHours.end ?? "17:00");
+  const jobs_per_day = Math.max(1, Math.min(5, Number(bookingSettings.jobs_per_day ?? 3) || 3));
+  const work_days = normalizeWorkDays(bookingSettings.work_days);
+
   return {
-    duration_minutes: Number(bookingSettings.duration_minutes ?? 60) || 60,
-    buffer_minutes: Number(bookingSettings.buffer_minutes ?? 15) || 15,
-    timezone: String(bookingSettings.timezone ?? fallbackTimezone ?? "America/New_York"),
-    start_time: String(bookingSettings.start_time ?? officeHours.start ?? "08:00"),
-    end_time: String(bookingSettings.end_time ?? officeHours.end ?? "18:00"),
+    timezone,
+    start_time,
+    end_time,
+    work_days,
+    jobs_per_day,
   };
 }
 
-function buildSlotGroups(settings: ReturnType<typeof buildBookingSettings>) {
-  const groups: { day_label: string; date_value: string; slots: { label: string; value: string }[] }[] = [];
-  const now = new Date();
-  const currentParts = getTimeZoneParts(now, settings.timezone);
+function getWindowLabels(count: number) {
+  if (count <= 1) return ["Daytime"];
+  if (count === 2) return ["Morning", "Afternoon"];
+  if (count === 3) return ["Morning", "Midday", "Afternoon"];
+  if (count === 4) return ["Early morning", "Late morning", "Early afternoon", "Late afternoon"];
+  return ["Early morning", "Late morning", "Midday", "Early afternoon", "Late afternoon"];
+}
+
+function buildWindowsForDay(
+  year: number,
+  month: number,
+  day: number,
+  settings: BookingSettings,
+): BookingWindow[] {
   const startMinutes = parseTimeToMinutes(settings.start_time);
   const endMinutes = parseTimeToMinutes(settings.end_time);
-  const stepMinutes = settings.duration_minutes + settings.buffer_minutes;
+  const totalMinutes = endMinutes - startMinutes;
 
-  for (let offset = 0; offset < 10 && groups.length < 5; offset += 1) {
+  if (totalMinutes <= 0) return [];
+
+  const labels = getWindowLabels(settings.jobs_per_day);
+  const size = totalMinutes / labels.length;
+
+  return labels.map((label, index) => {
+    const windowStart = Math.round(startMinutes + size * index);
+    const windowEnd = index === labels.length - 1
+      ? endMinutes
+      : Math.round(startMinutes + size * (index + 1));
+    const scheduledAt = zonedDateTimeToUtc(
+      year,
+      month,
+      day,
+      Math.floor(windowStart / 60),
+      windowStart % 60,
+      settings.timezone,
+    );
+
+    return {
+      key: label.toLowerCase().replace(/\s+/g, "-"),
+      label,
+      range_label: `${formatMinutes(windowStart)} - ${formatMinutes(windowEnd)}`,
+      value: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}:${label
+        .toLowerCase()
+        .replace(/\s+/g, "-")}`,
+      scheduled_at: scheduledAt.toISOString(),
+    };
+  });
+}
+
+function buildWindowGroups(settings: BookingSettings): BookingWindowGroup[] {
+  const groups: BookingWindowGroup[] = [];
+  const now = new Date();
+  const currentParts = getTimeZoneParts(now, settings.timezone);
+
+  for (let offset = 0; offset < 14 && groups.length < 5; offset += 1) {
     const localDate = new Date(Date.UTC(currentParts.year, currentParts.month - 1, currentParts.day + offset));
     const year = localDate.getUTCFullYear();
     const month = localDate.getUTCMonth() + 1;
     const day = localDate.getUTCDate();
     const midday = zonedDateTimeToUtc(year, month, day, 12, 0, settings.timezone);
+    const parts = getTimeZoneParts(midday, settings.timezone);
+    const weekdayKey = parts.weekday.slice(0, 3) as WorkDay;
+
+    if (!settings.work_days.includes(weekdayKey)) continue;
+
     const dayLabel = new Intl.DateTimeFormat("en-US", {
       weekday: "long",
       month: "short",
@@ -117,31 +220,46 @@ function buildSlotGroups(settings: ReturnType<typeof buildBookingSettings>) {
       timeZone: settings.timezone,
     }).format(midday);
 
-    const slots: { label: string; value: string }[] = [];
-    for (let minute = startMinutes; minute + settings.duration_minutes <= endMinutes; minute += stepMinutes) {
-      const slot = zonedDateTimeToUtc(year, month, day, Math.floor(minute / 60), minute % 60, settings.timezone);
-      if (slot.getTime() <= now.getTime() + 5 * 60 * 1000) continue;
+    const windows = buildWindowsForDay(year, month, day, settings).filter((window) => {
+      return new Date(window.scheduled_at).getTime() > now.getTime() + 5 * 60 * 1000;
+    });
 
-      slots.push({
-        label: new Intl.DateTimeFormat("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          timeZone: settings.timezone,
-        }).format(slot),
-        value: slot.toISOString(),
-      });
-    }
+    if (windows.length === 0) continue;
 
-    if (slots.length > 0) {
-      groups.push({
-        day_label: dayLabel,
-        date_value: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
-        slots,
-      });
-    }
+    groups.push({
+      day_label: dayLabel,
+      date_value: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+      windows,
+    });
   }
 
   return groups;
+}
+
+function normalizeServiceType(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return "";
+  return normalized
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+async function sendSms(from: string, to: string, body: string) {
+  const accountSid = Deno.env.get("TWILIO_MASTER_ACCOUNT_SID");
+  const authToken = Deno.env.get("TWILIO_MASTER_AUTH_TOKEN");
+  if (!accountSid || !authToken) return;
+
+  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+  await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${btoa(`${accountSid}:${authToken}`)}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({ From: from, To: to, Body: body }),
+  });
 }
 
 async function resolveWorkspaceBooking(supabase: ReturnType<typeof getServiceClient>, slug: string) {
@@ -207,7 +325,7 @@ Deno.serve(async (req) => {
     }
 
     const { workspace, config, bookingSettings } = await resolveWorkspaceBooking(supabase, slug);
-    const slotGroups = buildSlotGroups(bookingSettings);
+    const windowGroups = buildWindowGroups(bookingSettings);
 
     if (action === "load") {
       return new Response(
@@ -217,7 +335,7 @@ Deno.serve(async (req) => {
           industry: workspace.industry,
           booking_link: config.booking_link,
           booking_settings: bookingSettings,
-          slot_groups: slotGroups,
+          window_groups: windowGroups,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
@@ -232,7 +350,8 @@ Deno.serve(async (req) => {
 
     const customerName = String(body?.customer_name || "").trim();
     const customerPhone = normalizePhone(String(body?.customer_phone || ""));
-    const scheduledAt = String(body?.scheduled_at || "");
+    const selectedWindowValue = String(body?.window_value || "");
+    const serviceType = normalizeServiceType(String(body?.service_type || ""));
 
     if (!customerName) {
       return new Response(JSON.stringify({ error: "Missing customer name." }), {
@@ -248,9 +367,13 @@ Deno.serve(async (req) => {
       });
     }
 
-    const allowedSlots = new Set(slotGroups.flatMap((group) => group.slots.map((slot) => slot.value)));
-    if (!allowedSlots.has(scheduledAt)) {
-      return new Response(JSON.stringify({ error: "That booking time is no longer available. Refresh and pick another slot." }), {
+    const matchedGroup = windowGroups.find((group) =>
+      group.windows.some((window) => window.value === selectedWindowValue)
+    );
+    const matchedWindow = matchedGroup?.windows.find((window) => window.value === selectedWindowValue);
+
+    if (!matchedGroup || !matchedWindow) {
+      return new Response(JSON.stringify({ error: "That service window is no longer available. Refresh and pick another one." }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -306,7 +429,7 @@ Deno.serve(async (req) => {
       .select("id")
       .eq("workspace_id", workspace.id)
       .eq("lead_id", leadId)
-      .in("status", ["scheduled", "in_progress"])
+      .in("status", ["scheduled", "booked", "in_progress"])
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -318,7 +441,7 @@ Deno.serve(async (req) => {
         .from("jobs")
         .update({
           status: "scheduled",
-          scheduled_at: scheduledAt,
+          scheduled_at: matchedWindow.scheduled_at,
           stage_id: firstStage?.id ?? null,
         })
         .eq("id", jobId);
@@ -331,13 +454,15 @@ Deno.serve(async (req) => {
           lead_id: leadId,
           stage_id: firstStage?.id ?? null,
           status: "scheduled",
-          scheduled_at: scheduledAt,
+          scheduled_at: matchedWindow.scheduled_at,
         })
         .select("id")
         .single();
       if (insertJobError) throw insertJobError;
       jobId = insertedJob.id;
     }
+
+    const windowSummary = `${matchedGroup.day_label}, ${matchedWindow.label}`;
 
     await supabase.from("workflow_logs").insert({
       workspace_id: workspace.id,
@@ -347,15 +472,36 @@ Deno.serve(async (req) => {
         job_id: jobId,
         customer_name: customerName,
         customer_phone: customerPhone,
-        scheduled_at: scheduledAt,
+        service_type: serviceType || null,
+        requested_window: {
+          day_label: matchedGroup.day_label,
+          label: matchedWindow.label,
+          range_label: matchedWindow.range_label,
+          value: matchedWindow.value,
+        },
+        scheduled_at: matchedWindow.scheduled_at,
       },
     });
+
+    if (typeof config.from_number === "string" && typeof config.contractor_phone === "string") {
+      const servicePrefix = serviceType ? `${serviceType} | ` : "";
+      await sendSms(
+        config.from_number,
+        config.contractor_phone,
+        `New booking request: ${servicePrefix}${customerName}\n${windowSummary}\n${customerPhone}\nConfirm the exact arrival time with the customer.`,
+      );
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
         workspace_name: workspace.name,
-        scheduled_at: scheduledAt,
+        requested_window: {
+          day_label: matchedGroup.day_label,
+          label: matchedWindow.label,
+          range_label: matchedWindow.range_label,
+        },
+        scheduled_at: matchedWindow.scheduled_at,
         lead_id: leadId,
         job_id: jobId,
       }),
