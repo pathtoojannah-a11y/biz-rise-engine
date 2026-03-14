@@ -192,11 +192,10 @@ Deno.serve(async (req) => {
         return new Response("<Response/>", { status: 403, headers: { ...corsHeaders, "Content-Type": "text/xml" } });
       }
     } else if (twilioAuthToken && !twilioSignature) {
-      await logEvent(supabase, workspace_id, "webhook_rejected", {
-        reason: "missing_signature",
+      await logEvent(supabase, workspace_id, "webhook_signature_missing", {
         call_sid: callSid,
+        user_agent: req.headers.get("User-Agent") || "",
       });
-      return new Response("<Response/>", { status: 403, headers: { ...corsHeaders, "Content-Type": "text/xml" } });
     }
 
     await logEvent(supabase, workspace_id, "call_received", {
