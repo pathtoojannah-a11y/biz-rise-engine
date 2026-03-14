@@ -28,6 +28,16 @@ import { useLocations } from "@/hooks/useLocations";
 import { hasCoreSetup, isWorkspaceLive, normalizeOnboardingConfig, OnboardingConfig } from "@/lib/onboarding";
 import { toast } from "sonner";
 
+type BookingChoice = "external" | "nexaos" | null;
+type BookingProvider = "calendly" | "jobber" | "housecall-pro" | "other";
+
+const BOOKING_PROVIDERS: { value: BookingProvider; label: string }[] = [
+  { value: "calendly", label: "Calendly" },
+  { value: "jobber", label: "Jobber" },
+  { value: "housecall-pro", label: "Housecall Pro" },
+  { value: "other", label: "Other" },
+];
+
 const STEP_LABELS = [
   "Business info",
   "Phone setup",
@@ -41,7 +51,7 @@ const STEP_DESCRIPTIONS = [
   "Check the business details NexaOS will use for launch.",
   "Enter the cell number NexaOS should ring, then create your new business number.",
   "Start the check, then text your NexaOS number from your saved cell so NexaOS can verify the SMS path.",
-  "Decide whether qualified leads should get a booking link by text.",
+  "Add the booking link NexaOS should send after qualification, or create a NexaOS booking page now.",
   "Paste your Google review link. High ratings go public. Low ratings stay private.",
   "Set reminder hours, finish setup, and unlock the workspace.",
 ];
@@ -69,6 +79,27 @@ function getAreaCode(value: string) {
 
 function isPhoneValid(value: string) {
   return Boolean(normalizePhone(value));
+}
+
+function getBookingProviderFromLink(link: string): BookingProvider {
+  const normalized = link.toLowerCase();
+  if (normalized.includes("calendly")) return "calendly";
+  if (normalized.includes("jobber")) return "jobber";
+  if (normalized.includes("housecallpro")) return "housecall-pro";
+  return "other";
+}
+
+function isValidBookingUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function getPublicAppUrl() {
+  return (import.meta.env.VITE_APP_URL as string | undefined)?.trim() || window.location.origin;
 }
 
 function getProvisioningErrorMessage(error: unknown) {
@@ -122,10 +153,22 @@ export default function GoLive() {
 
   const [currentStep, setCurrentStep] = useState(recommendedStep);
   const [contractorPhone, setContractorPhone] = useState(config.contractor_phone || "");
-  const [bookingChoice, setBookingChoice] = useState<"yes" | "no" | null>(
-    config.booking_link ? "yes" : onboarding.booking_link_ready ? "no" : null,
+  const [bookingChoice, setBookingChoice] = useState<BookingChoice>(
+    config.booking_mode ?? (config.booking_link ? "external" : null),
+  );
+  const [bookingProvider, setBookingProvider] = useState<BookingProvider>(
+    config.booking_provider ?? getBookingProviderFromLink(config.booking_link || ""),
   );
   const [bookingLink, setBookingLink] = useState(config.booking_link || "");
+  const [bookingDuration, setBookingDuration] = useState(String(config.booking_settings.duration_minutes || 60));
+  const [bookingBuffer, setBookingBuffer] = useState(String(config.booking_settings.buffer_minutes || 15));
+  const [bookingTimezone, setBookingTimezone] = useState(config.booking_settings.timezone || workspace?.timezone || "America/New_York");
+  const [bookingStart, setBookingStart] = useState(
+    config.booking_settings.start_time || onboarding.office_open || config.office_hours.start || "08:00",
+  );
+  const [bookingEnd, setBookingEnd] = useState(
+    config.booking_settings.end_time || onboarding.office_close || config.office_hours.end || "18:00",
+  );
   const [reviewLink, setReviewLink] = useState(existingReviewLink);
   const [officeStart, setOfficeStart] = useState(onboarding.office_open || config.office_hours.start || "08:00");
   const [officeEnd, setOfficeEnd] = useState(onboarding.office_close || config.office_hours.end || "18:00");
@@ -145,9 +188,30 @@ export default function GoLive() {
 
   useEffect(() => {
     setContractorPhone(config.contractor_phone || "");
-    setBookingChoice(config.booking_link ? "yes" : onboarding.booking_link_ready ? "no" : null);
+    setBookingChoice(config.booking_mode ?? (config.booking_link ? "external" : null));
+    setBookingProvider(config.booking_provider ?? getBookingProviderFromLink(config.booking_link || ""));
     setBookingLink(config.booking_link || "");
-  }, [config.contractor_phone, config.booking_link, onboarding.booking_link_ready]);
+    setBookingDuration(String(config.booking_settings.duration_minutes || 60));
+    setBookingBuffer(String(config.booking_settings.buffer_minutes || 15));
+    setBookingTimezone(config.booking_settings.timezone || workspace?.timezone || "America/New_York");
+    setBookingStart(config.booking_settings.start_time || onboarding.office_open || config.office_hours.start || "08:00");
+    setBookingEnd(config.booking_settings.end_time || onboarding.office_close || config.office_hours.end || "18:00");
+  }, [
+    config.contractor_phone,
+    config.booking_mode,
+    config.booking_provider,
+    config.booking_link,
+    config.booking_settings.duration_minutes,
+    config.booking_settings.buffer_minutes,
+    config.booking_settings.timezone,
+    config.booking_settings.start_time,
+    config.booking_settings.end_time,
+    onboarding.office_open,
+    onboarding.office_close,
+    config.office_hours.start,
+    config.office_hours.end,
+    workspace?.timezone,
+  ]);
 
   useEffect(() => {
     setReviewLink(existingReviewLink);
@@ -253,17 +317,60 @@ export default function GoLive() {
 
   const handleSaveBooking = async () => {
     if (!bookingChoice) {
-      toast.error("Choose whether you want NexaOS to send a booking link.");
-      return;
-    }
-    if (bookingChoice === "yes" && !bookingLink.trim()) {
-      toast.error("Paste the scheduling link before continuing.");
+      toast.error("Choose how NexaOS should send customers to booking.");
       return;
     }
 
     setSavingBooking(true);
     try {
-      await saveConfig.mutateAsync({ booking_link: bookingChoice === "yes" ? bookingLink.trim() : "" });
+      if (bookingChoice === "external") {
+        if (!bookingLink.trim()) {
+          toast.error("Paste the scheduling link before continuing.");
+          return;
+        }
+        if (!isValidBookingUrl(bookingLink.trim())) {
+          toast.error("Enter a valid booking URL.");
+          return;
+        }
+
+        await saveConfig.mutateAsync({
+          booking_mode: "external",
+          booking_provider: bookingProvider,
+          booking_link: bookingLink.trim(),
+        });
+      } else {
+        const durationMinutes = Number(bookingDuration);
+        const bufferMinutes = Number(bookingBuffer);
+
+        if (!Number.isFinite(durationMinutes) || durationMinutes < 15) {
+          toast.error("Set an appointment length of at least 15 minutes.");
+          return;
+        }
+        if (!Number.isFinite(bufferMinutes) || bufferMinutes < 0) {
+          toast.error("Set a valid buffer between appointments.");
+          return;
+        }
+        if (!bookingStart || !bookingEnd || bookingStart >= bookingEnd) {
+          toast.error("Set a valid booking window.");
+          return;
+        }
+
+        const generatedBookingLink = `${getPublicAppUrl()}/book/${workspace.slug}`;
+        await saveConfig.mutateAsync({
+          booking_mode: "nexaos",
+          booking_provider: "other",
+          booking_link: generatedBookingLink,
+          booking_settings: {
+            duration_minutes: durationMinutes,
+            buffer_minutes: bufferMinutes,
+            timezone: bookingTimezone || workspace.timezone || "America/New_York",
+            start_time: bookingStart,
+            end_time: bookingEnd,
+          },
+        });
+        setBookingLink(generatedBookingLink);
+      }
+
       await persistOnboarding({ booking_link_ready: true });
       toast.success("Booking step saved.");
       setCurrentStep(4);
@@ -582,53 +689,144 @@ export default function GoLive() {
                 <div className="grid gap-4 lg:grid-cols-2">
                   <button
                     type="button"
-                    onClick={() => setBookingChoice("yes")}
+                    onClick={() => setBookingChoice("external")}
                     className={`rounded-3xl border p-6 text-left transition ${
-                      bookingChoice === "yes"
+                      bookingChoice === "external"
                         ? "border-emerald-500 bg-emerald-50 shadow-sm"
                         : "border-slate-200 bg-white hover:border-slate-300"
                     }`}
                   >
-                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Yes</p>
-                    <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Send my scheduling link</h3>
+                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Existing link</p>
+                    <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">I already have a booking link</h3>
                     <p className="mt-3 text-sm leading-6 text-slate-600">
-                      NexaOS will text qualified leads a direct booking link right after qualification.
+                      Paste your Calendly, Jobber, Housecall Pro, or other booking URL and NexaOS will text it after qualification.
                     </p>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setBookingChoice("no")}
+                    onClick={() => setBookingChoice("nexaos")}
                     className={`rounded-3xl border p-6 text-left transition ${
-                      bookingChoice === "no"
+                      bookingChoice === "nexaos"
                         ? "border-emerald-500 bg-emerald-50 shadow-sm"
                         : "border-slate-200 bg-white hover:border-slate-300"
                     }`}
                   >
-                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Not yet</p>
-                    <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Stop after qualification</h3>
+                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">NexaOS link</p>
+                    <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Create my NexaOS booking link</h3>
                     <p className="mt-3 text-sm leading-6 text-slate-600">
-                      NexaOS will collect the lead details, then tell the customer someone will reach out soon.
+                      Create a NexaOS-hosted booking page so customers can pick a real appointment time right after qualification.
                     </p>
                   </button>
                 </div>
 
-                {bookingChoice === "yes" && (
-                  <div className="space-y-2">
-                    <Label htmlFor="booking-link">Scheduling link</Label>
-                    <Input
-                      id="booking-link"
-                      value={bookingLink}
-                      onChange={(event) => setBookingLink(event.target.value)}
-                      placeholder="https://calendly.com/your-business"
-                    />
-                    <p className="text-sm text-slate-500">Calendly, Housecall Pro, Jobber, or any booking page works.</p>
+                {bookingChoice === "external" && (
+                  <div className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="space-y-2">
+                      <Label>Booking provider</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {BOOKING_PROVIDERS.map((provider) => (
+                          <button
+                            key={provider.value}
+                            type="button"
+                            onClick={() => setBookingProvider(provider.value)}
+                            className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                              bookingProvider === provider.value
+                                ? "border-emerald-500 bg-emerald-100 text-emerald-950"
+                                : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                            }`}
+                          >
+                            {provider.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="booking-link">Booking URL</Label>
+                      <Input
+                        id="booking-link"
+                        value={bookingLink}
+                        onChange={(event) => setBookingLink(event.target.value)}
+                        placeholder="https://calendly.com/your-business"
+                      />
+                      <p className="text-sm text-slate-500">
+                        NexaOS stores this link and texts it to qualified leads automatically.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {bookingChoice === "nexaos" && (
+                  <div className="space-y-5 rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-5">
+                    <div>
+                      <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">NexaOS booking page</p>
+                      <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Set the booking rules once</h3>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">
+                        NexaOS will generate a hosted booking page and send it after qualification so customers can pick a real time slot.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="booking-duration">Appointment length</Label>
+                        <Input
+                          id="booking-duration"
+                          inputMode="numeric"
+                          value={bookingDuration}
+                          onChange={(event) => setBookingDuration(event.target.value.replace(/[^\d]/g, ""))}
+                          placeholder="60"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="booking-buffer">Buffer between appointments</Label>
+                        <Input
+                          id="booking-buffer"
+                          inputMode="numeric"
+                          value={bookingBuffer}
+                          onChange={(event) => setBookingBuffer(event.target.value.replace(/[^\d]/g, ""))}
+                          placeholder="15"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="booking-start">Booking window start</Label>
+                        <Input
+                          id="booking-start"
+                          type="time"
+                          value={bookingStart}
+                          onChange={(event) => setBookingStart(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="booking-end">Booking window end</Label>
+                        <Input
+                          id="booking-end"
+                          type="time"
+                          value={bookingEnd}
+                          onChange={(event) => setBookingEnd(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor="booking-timezone">Timezone</Label>
+                        <Input
+                          id="booking-timezone"
+                          value={bookingTimezone}
+                          onChange={(event) => setBookingTimezone(event.target.value)}
+                          placeholder="America/New_York"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-emerald-200 bg-white px-4 py-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Generated NexaOS booking link</p>
+                      <p className="mt-2 break-all text-base font-semibold text-slate-950">{`${getPublicAppUrl()}/book/${workspace.slug}`}</p>
+                    </div>
                   </div>
                 )}
 
                 <div className="flex justify-end">
                   <Button className={primaryButtonClass} onClick={handleSaveBooking} disabled={savingBooking}>
                     {savingBooking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageSquare className="mr-2 h-4 w-4" />}
-                    Save and continue
+                    Save booking and continue
                   </Button>
                 </div>
               </div>

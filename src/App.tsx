@@ -25,6 +25,7 @@ const ProductLeadRecovery = lazy(() => import("./pages/Marketing/ProductLeadReco
 const ProductPipeline = lazy(() => import("./pages/Marketing/ProductPipeline"));
 const ProductReputation = lazy(() => import("./pages/Marketing/ProductReputation"));
 const ROICalculator = lazy(() => import("./pages/Marketing/ROICalculator"));
+const PublicBooking = lazy(() => import("./pages/PublicBooking"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Leads = lazy(() => import("./pages/Leads"));
 const Pipeline = lazy(() => import("./pages/Pipeline"));
@@ -60,6 +61,7 @@ const App = () => (
                 <Route path="/" element={<Index />} />
                 <Route path="/pricing" element={<Pricing />} />
                 <Route path="/demo" element={<DemoBooking />} />
+                <Route path="/book/:workspaceSlug" element={<PublicBooking />} />
                 <Route path="/trust" element={<Trust />} />
                 <Route path="/industry/hvac" element={<IndustryHVAC />} />
                 <Route path="/industry/plumbing" element={<IndustryPlumbing />} />

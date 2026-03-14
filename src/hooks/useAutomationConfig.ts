@@ -9,6 +9,15 @@ export interface TwilioConfig {
   provisioned_number_id: string;
   provisioning_scope: "local" | "state" | "fallback" | null;
   contractor_phone: string;
+  booking_mode: "external" | "nexaos" | null;
+  booking_provider: "calendly" | "jobber" | "housecall-pro" | "other" | null;
+  booking_settings: {
+    duration_minutes: number;
+    buffer_minutes: number;
+    timezone: string;
+    start_time: string;
+    end_time: string;
+  };
   missed_call_sms: boolean;
   qualification_flow: boolean;
   auto_create_job: boolean;
@@ -29,6 +38,15 @@ const DEFAULT_CONFIG: TwilioConfig = {
   provisioned_number_id: "",
   provisioning_scope: null,
   contractor_phone: "",
+  booking_mode: null,
+  booking_provider: null,
+  booking_settings: {
+    duration_minutes: 60,
+    buffer_minutes: 15,
+    timezone: "America/New_York",
+    start_time: "08:00",
+    end_time: "18:00",
+  },
   missed_call_sms: true,
   qualification_flow: true,
   auto_create_job: true,
@@ -65,6 +83,10 @@ export function useAutomationConfig() {
   const config: TwilioConfig = {
     ...DEFAULT_CONFIG,
     ...((query.data?.config as any) || {}),
+    booking_settings: {
+      ...DEFAULT_CONFIG.booking_settings,
+      ...((((query.data?.config as any)?.booking_settings as any) || {})),
+    },
     office_hours: {
       ...DEFAULT_CONFIG.office_hours,
       ...(((query.data?.config as any)?.office_hours as any) || {}),
