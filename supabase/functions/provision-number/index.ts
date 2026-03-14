@@ -221,13 +221,44 @@ Deno.serve(async (req) => {
 
     if (existingNumber) {
       const existingConfig = (existingIntegration?.config as Record<string, unknown> | null) ?? {};
+      const mergedConfig = {
+        ...existingConfig,
+        from_number: existingNumber.phone_number,
+        twilio_number_sid: existingNumber.twilio_sid,
+        provisioned_number_id: existingNumber.id,
+        contractor_phone: normalizedContractorPhone,
+        review_delay_days: Number(existingConfig.review_delay_days ?? 2) || 2,
+      };
+
+      if (existingIntegration) {
+        const { error: updateError } = await supabase
+          .from("integrations")
+          .update({
+            config: mergedConfig as Record<string, unknown>,
+            status: existingIntegration.status === "connected" ? "connected" : "provisioned",
+          })
+          .eq("id", existingIntegration.id);
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertIntegrationError } = await supabase
+          .from("integrations")
+          .insert({
+            workspace_id,
+            provider: "twilio",
+            config: mergedConfig as Record<string, unknown>,
+            status: existingNumber.status === "active" ? "connected" : "provisioned",
+            connected_at: existingNumber.status === "active" ? new Date().toISOString() : null,
+          });
+        if (insertIntegrationError) throw insertIntegrationError;
+      }
+
       return new Response(
         JSON.stringify({
           phone_number: existingNumber.phone_number,
           provisioned_number_id: existingNumber.id,
-          status: existingIntegration?.status ?? existingNumber.status,
-          provisioning_scope: existingConfig.provisioning_scope ?? "fallback",
-          contractor_phone: existingConfig.contractor_phone ?? normalizedContractorPhone,
+          status: existingIntegration?.status ?? (existingNumber.status === "active" ? "connected" : "provisioned"),
+          provisioning_scope: mergedConfig.provisioning_scope ?? "fallback",
+          contractor_phone: normalizedContractorPhone,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );

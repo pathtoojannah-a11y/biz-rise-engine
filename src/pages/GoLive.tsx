@@ -214,11 +214,22 @@ export default function GoLive() {
   const handleProvision = async () => {
     setProvisioningError(null);
     try {
+      const normalizedContractorPhone = normalizePhone(contractorPhone);
+      if (!normalizedContractorPhone) {
+        toast.error("Enter the cell number NexaOS should ring.");
+        return;
+      }
+
+      if (normalizedContractorPhone !== config.contractor_phone) {
+        await saveConfig.mutateAsync({ contractor_phone: normalizedContractorPhone });
+      }
+
       await provisionNumber.mutateAsync({
-        contractor_phone: normalizePhone(contractorPhone),
+        contractor_phone: normalizedContractorPhone,
         preferred_area_code: getAreaCode(contractorPhone),
       });
       await refreshWorkspace();
+      setContractorPhone(normalizePhoneInput(normalizedContractorPhone));
       toast.success("Your new NexaOS number is ready.");
       setCurrentStep(2);
     } catch (error) {
