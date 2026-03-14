@@ -31,7 +31,7 @@ import { toast } from "sonner";
 const STEP_LABELS = [
   "Business info",
   "Phone setup",
-  "Test call",
+  "Text your NexaOS number",
   "Booking link",
   "Google reviews",
   "Office hours",
@@ -40,7 +40,7 @@ const STEP_LABELS = [
 const STEP_DESCRIPTIONS = [
   "Check the business details NexaOS will use for launch.",
   "Enter the cell number NexaOS should ring, then create your new business number.",
-  "Run one real missed-call test so NexaOS can verify the automation.",
+  "Text your NexaOS number from your saved cell so NexaOS can verify the SMS path.",
   "Decide whether qualified leads should get a booking link by text.",
   "Paste your Google review link. High ratings go public. Low ratings stay private.",
   "Set reminder hours, finish setup, and unlock the workspace.",
@@ -232,9 +232,9 @@ export default function GoLive() {
     setStartingTest(true);
     try {
       await persistOnboarding({ test_call_started_at: new Date().toISOString() });
-      toast("Use another phone to call your new NexaOS number and let it ring.");
+      toast("Text your NexaOS number from your saved cell. Send something short like hello.");
     } catch (error: any) {
-      toast.error(error.message || "Could not start the test call.");
+      toast.error(error.message || "Could not start the SMS verification.");
     } finally {
       setStartingTest(false);
     }
@@ -456,7 +456,7 @@ export default function GoLive() {
                         disabled={!isPhoneValid(contractorPhone) || provisionNumber.isPending}
                       >
                         {provisionNumber.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Phone className="mr-2 h-4 w-4" />}
-                        {isProvisioned ? "Recheck my number" : "Create my business number"}
+                        {isProvisioned ? "Recheck my NexaOS number" : "Create my NexaOS number"}
                       </Button>
                     </div>
                   </div>
@@ -464,7 +464,7 @@ export default function GoLive() {
                   <div className="rounded-3xl bg-[linear-gradient(165deg,#022c22_0%,#052e16_54%,#020617_100%)] p-6 text-white shadow-[0_30px_80px_-40px_rgba(6,95,70,0.95)]">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Your business number</p>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Your NexaOS number</p>
                         <p className="mt-2 text-3xl font-semibold tracking-tight">{config.from_number || "Not assigned yet"}</p>
                       </div>
                       <Badge className="rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-emerald-200 hover:bg-emerald-500/15">
@@ -500,20 +500,20 @@ export default function GoLive() {
             {currentStep === 2 && (
               <div className="space-y-6">
                 <div className="rounded-3xl border border-slate-200 bg-white p-6">
-                  <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Run one real test</p>
+                  <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">Verify by text</p>
                   <ol className="mt-4 space-y-3 text-sm leading-6 text-slate-700">
-                    <li>1. Use a different phone and call your new NexaOS business number.</li>
-                    <li>2. Let your cell ring, but do not answer.</li>
-                    <li>3. NexaOS should catch the miss and mark this step complete automatically.</li>
+                    <li>1. Open the text app on the saved cell number.</li>
+                    <li>2. Text your NexaOS number. Send something short like hello.</li>
+                    <li>3. NexaOS replies and marks this step complete automatically.</li>
                   </ol>
 
                   <div className="mt-5 grid gap-4 md:grid-cols-2">
                     <div className="rounded-2xl bg-slate-950 px-5 py-4 text-white">
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Call this number</p>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Text this number</p>
                       <p className="mt-2 text-2xl font-semibold tracking-tight">{config.from_number || "Create the NexaOS number first"}</p>
                     </div>
                     <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">This cell should ring</p>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Send the text from this cell</p>
                       <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">
                         {config.contractor_phone || normalizePhone(contractorPhone) || "Add your cell number first"}
                       </p>
@@ -526,8 +526,8 @@ export default function GoLive() {
                     <div className="flex items-center gap-3">
                       <CheckCircle2 className="h-5 w-5 text-emerald-600" />
                       <div>
-                        <p className="font-semibold">Test passed</p>
-                        <p className="text-sm text-emerald-800">NexaOS saw the missed call and your phone flow is active.</p>
+                        <p className="font-semibold">SMS verified</p>
+                        <p className="text-sm text-emerald-800">NexaOS replied to your text and the number is connected.</p>
                       </div>
                     </div>
                   </div>
@@ -535,8 +535,8 @@ export default function GoLive() {
                   <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
                     <p className="text-sm text-slate-700">
                       {onboarding.test_call_started_at
-                        ? "Listening for the missed call now. Keep this page open while you run the test."
-                        : "Start the test when your new NexaOS number is ready."}
+                        ? "Waiting for your text now. Keep this page open after you message the NexaOS number."
+                        : "Start the SMS verification when your new NexaOS number is ready."}
                     </p>
                   </div>
                 )}
@@ -544,8 +544,8 @@ export default function GoLive() {
                 <div className="flex justify-end gap-3">
                   {!onboarding.test_call_verified && (
                     <Button className={primaryButtonClass} onClick={handleStartTest} disabled={!config.from_number || startingTest}>
-                      {startingTest ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Phone className="mr-2 h-4 w-4" />}
-                      {onboarding.test_call_started_at ? "Retry test" : "Start test"}
+                      {startingTest ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageSquare className="mr-2 h-4 w-4" />}
+                      {onboarding.test_call_started_at ? "Retry SMS check" : "Start SMS check"}
                     </Button>
                   )}
                   {onboarding.test_call_verified && (
@@ -659,8 +659,8 @@ export default function GoLive() {
                   </div>
                   <div className="rounded-3xl border border-slate-200 bg-white p-5">
                     <ShieldCheck className="h-5 w-5 text-emerald-600" />
-                    <p className="mt-4 text-sm font-semibold text-slate-950">Rings this cell</p>
-                    <p className="mt-2 text-sm text-slate-600">{config.contractor_phone || "Pending"}</p>
+                    <p className="mt-4 text-sm font-semibold text-slate-950">Activation</p>
+                    <p className="mt-2 text-sm text-slate-600">{onboarding.test_call_verified ? "SMS verified" : "Waiting for SMS verification"}</p>
                   </div>
                   <div className="rounded-3xl border border-slate-200 bg-white p-5">
                     <MessageSquare className="h-5 w-5 text-emerald-600" />

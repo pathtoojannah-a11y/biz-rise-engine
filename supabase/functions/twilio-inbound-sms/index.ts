@@ -405,6 +405,77 @@ async function handleContractorReply(
   return true;
 }
 
+async function handleOnboardingSmsVerification(
+  supabase: any,
+  workspaceId: string,
+  config: any,
+  fromNumber: string,
+  body: string,
+) {
+  if (!body.trim()) return false;
+
+  const { data: workspace } = await supabase
+    .from("workspaces")
+    .select("onboarding_config")
+    .eq("id", workspaceId)
+    .single();
+
+  const onboardingConfig =
+    workspace?.onboarding_config &&
+    typeof workspace.onboarding_config === "object" &&
+    !Array.isArray(workspace.onboarding_config)
+      ? workspace.onboarding_config
+      : {};
+
+  if (!onboardingConfig.test_call_started_at || onboardingConfig.test_call_verified) {
+    return false;
+  }
+
+  const checklist =
+    onboardingConfig.checklist &&
+    typeof onboardingConfig.checklist === "object" &&
+    !Array.isArray(onboardingConfig.checklist)
+      ? onboardingConfig.checklist
+      : {};
+
+  const confirmationMessage = "NexaOS is connected. Customers can now text and call this number.";
+
+  await sendSms(config.from_number, fromNumber, confirmationMessage);
+
+  await supabase
+    .from("workspaces")
+    .update({
+      onboarding_config: {
+        ...onboardingConfig,
+        test_call_verified: true,
+        test_call_verified_at: new Date().toISOString(),
+        checklist: {
+          ...checklist,
+          twilio_connected: true,
+        },
+      } as any,
+    })
+    .eq("id", workspaceId);
+
+  await supabase
+    .from("integrations")
+    .update({ status: "connected", connected_at: new Date().toISOString() })
+    .eq("workspace_id", workspaceId)
+    .eq("provider", "twilio");
+
+  await supabase
+    .from("provisioned_numbers")
+    .update({ status: "active" })
+    .eq("workspace_id", workspaceId);
+
+  await logEvent(supabase, workspaceId, "sms_test_verified", {
+    contractor_phone: config.contractor_phone,
+    inbound_preview: body.substring(0, 100),
+  });
+
+  return true;
+}
+
 const QUALIFICATION_STEPS: Record<string, { question: string; nextStep: string }> = {
   step_1_service_type: {
     question: "Repair, tune-up, or install?",
@@ -476,6 +547,11 @@ Deno.serve(async (req) => {
     const normalizedFrom = normalizePhone(fromNumber);
     const contractorPhone = config.contractor_phone ? normalizePhone(config.contractor_phone) : "";
     if (contractorPhone && normalizedFrom === contractorPhone) {
+      const verified = await handleOnboardingSmsVerification(supabase, workspace_id, config, fromNumber, body);
+      if (verified) {
+        return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
+      }
+
       const handled = await handleContractorReply(supabase, workspace_id, config, body);
       if (handled) {
         return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
