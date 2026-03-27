@@ -31,6 +31,7 @@ import { toast } from "sonner";
 type BookingChoice = "external" | "nexaos" | null;
 type BookingProvider = "calendly" | "jobber" | "housecall-pro" | "other";
 type WorkDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+type JobVariability = "same" | "varies";
 
 const BOOKING_PROVIDERS: { value: BookingProvider; label: string }[] = [
   { value: "calendly", label: "Calendly" },
@@ -62,7 +63,7 @@ const STEP_DESCRIPTIONS = [
   "Check the business details NexaOS will use for launch.",
   "Enter the cell number NexaOS should ring, then create your new business number.",
   "Start the check, then text your NexaOS number from your saved cell so NexaOS can verify the SMS path.",
-  "Choose an existing booking link or set the days, hours, and job windows NexaOS should offer.",
+  "Choose an existing booking link or answer a few simple questions so NexaOS can suggest your booking setup.",
   "Paste your Google review link. High ratings go public. Low ratings stay private.",
   "Set reminder hours, finish setup, and unlock the workspace.",
 ];
@@ -121,6 +122,54 @@ function normalizeWorkDays(value: unknown): WorkDay[] {
   );
 
   return days.length > 0 ? days : ["mon", "tue", "wed", "thu", "fri"];
+}
+
+function getJobVariability(value: unknown): JobVariability {
+  return value === "same" ? "same" : "varies";
+}
+
+function formatWorkDaySummary(days: WorkDay[]) {
+  const ordered = WORK_DAYS.filter((day) => days.includes(day.value)).map((day) => day.label);
+  if (ordered.length === 0) return "No work days selected";
+  if (ordered.length === 7) return "Every day";
+  return ordered.join(", ");
+}
+
+function getWindowRecommendation(jobsPerDay: number, jobVariability: JobVariability) {
+  if (jobsPerDay <= 1) {
+    return {
+      title: "One daytime window",
+      description: "NexaOS will show one broad daytime request window so you can place the visit where it fits.",
+    };
+  }
+
+  if (jobsPerDay === 2) {
+    return {
+      title: "Morning and afternoon windows",
+      description:
+        jobVariability === "same"
+          ? "This keeps things simple and still gives customers two clear choices."
+          : "Because jobs vary, wider morning and afternoon windows are the safest recommendation.",
+    };
+  }
+
+  if (jobsPerDay === 3) {
+    return {
+      title: "Morning, midday, and afternoon windows",
+      description:
+        jobVariability === "same"
+          ? "This gives you a balanced day without forcing exact-time scheduling."
+          : "This is the best default for variable field work because customers pick a window and you confirm the exact arrival later.",
+    };
+  }
+
+  return {
+    title: "Shorter windows across the day",
+    description:
+      jobVariability === "same"
+        ? "Because your jobs are more predictable, NexaOS can safely offer more windows in a day."
+        : "NexaOS can still offer more windows, but the contractor should confirm the exact arrival time after booking.",
+  };
 }
 
 function getProvisioningErrorMessage(error: unknown) {
@@ -190,6 +239,7 @@ export default function GoLive() {
   );
   const [bookingDays, setBookingDays] = useState<WorkDay[]>(normalizeWorkDays(config.booking_settings.work_days));
   const [jobsPerDay, setJobsPerDay] = useState(String(config.booking_settings.jobs_per_day || 3));
+  const [jobVariability, setJobVariability] = useState<JobVariability>(getJobVariability(config.booking_settings.job_variability));
   const [reviewLink, setReviewLink] = useState(existingReviewLink);
   const [officeStart, setOfficeStart] = useState(onboarding.office_open || config.office_hours.start || "08:00");
   const [officeEnd, setOfficeEnd] = useState(onboarding.office_close || config.office_hours.end || "18:00");
@@ -223,6 +273,7 @@ export default function GoLive() {
     setBookingEnd(config.booking_settings.end_time || onboarding.office_close || config.office_hours.end || "18:00");
     setBookingDays(normalizeWorkDays(config.booking_settings.work_days));
     setJobsPerDay(String(config.booking_settings.jobs_per_day || 3));
+    setJobVariability(getJobVariability(config.booking_settings.job_variability));
   }, [
     config.contractor_phone,
     config.booking_mode,
@@ -233,6 +284,7 @@ export default function GoLive() {
     config.booking_settings.end_time,
     config.booking_settings.work_days,
     config.booking_settings.jobs_per_day,
+    config.booking_settings.job_variability,
     onboarding.office_open,
     onboarding.office_close,
     config.office_hours.start,
@@ -392,6 +444,7 @@ export default function GoLive() {
             end_time: bookingEnd,
             work_days: bookingDays,
             jobs_per_day: Math.min(parsedJobsPerDay, 5),
+            job_variability: jobVariability,
           },
         });
         setBookingLink(generatedBookingLink);
@@ -477,6 +530,12 @@ export default function GoLive() {
       twilio_connected: onboarding.test_call_verified,
     },
   });
+
+  const parsedJobsPerDay = Number(jobsPerDay);
+  const bookingSuggestion = getWindowRecommendation(
+    Number.isFinite(parsedJobsPerDay) && parsedJobsPerDay > 0 ? parsedJobsPerDay : 3,
+    jobVariability,
+  );
 
   return (
     <OnboardingLayout
@@ -786,14 +845,14 @@ export default function GoLive() {
                   <div className="space-y-5 rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-5">
                     <div>
                       <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">NexaOS booking page</p>
-                      <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Set your availability once</h3>
+                      <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">Answer a few quick questions</h3>
                       <p className="mt-2 text-sm leading-6 text-slate-600">
-                        Contractors do not need dispatch software here. Tell NexaOS which days you work, your normal hours, and how many jobs you can usually take.
+                        NexaOS will suggest the simplest booking setup based on how you actually work. If something looks off, tap the answer you want to change.
                       </p>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label>Which days do you work?</Label>
+                    <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                      <Label>1. Which days do you usually work?</Label>
                       <div className="flex flex-wrap gap-2">
                         {WORK_DAYS.map((day) => (
                           <button
@@ -810,11 +869,12 @@ export default function GoLive() {
                           </button>
                         ))}
                       </div>
+                      <p className="text-sm text-slate-500">Tap the days you normally want customers to request visits.</p>
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="booking-start">Start time</Label>
+                      <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                        <Label htmlFor="booking-start">2. What time do you usually start?</Label>
                         <Input
                           id="booking-start"
                           type="time"
@@ -822,8 +882,8 @@ export default function GoLive() {
                           onChange={(event) => setBookingStart(event.target.value)}
                         />
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="booking-end">End time</Label>
+                      <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                        <Label htmlFor="booking-end">What time do you usually stop?</Label>
                         <Input
                           id="booking-end"
                           type="time"
@@ -831,8 +891,8 @@ export default function GoLive() {
                           onChange={(event) => setBookingEnd(event.target.value)}
                         />
                       </div>
-                      <div className="space-y-2">
-                        <Label>How many jobs can you usually take in a day?</Label>
+                      <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                        <Label>3. How many jobs can you usually handle in a day?</Label>
                         <div className="flex flex-wrap gap-2">
                           {["1", "2", "3", "4", "5"].map((value) => (
                             <button
@@ -850,10 +910,35 @@ export default function GoLive() {
                           ))}
                         </div>
                         <p className="text-sm text-slate-500">
-                          NexaOS turns this into simple morning, midday, and afternoon windows instead of rigid time slots.
+                          NexaOS uses this to suggest simple service windows instead of rigid time slots.
                         </p>
                       </div>
-                      <div className="space-y-2 md:col-span-2">
+                      <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                        <Label>4. Do jobs usually take about the same amount of time?</Label>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { value: "same", label: "Usually about the same" },
+                            { value: "varies", label: "They vary a lot" },
+                          ].map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() => setJobVariability(option.value as JobVariability)}
+                              className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                                jobVariability === option.value
+                                  ? "border-emerald-500 bg-emerald-100 text-emerald-950"
+                                  : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-sm text-slate-500">
+                          If jobs vary a lot, NexaOS leans toward wider windows so you can confirm the exact arrival later.
+                        </p>
+                      </div>
+                      <div className="space-y-2 md:col-span-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
                         <Label htmlFor="booking-timezone">Timezone</Label>
                         <Input
                           id="booking-timezone"
@@ -865,11 +950,34 @@ export default function GoLive() {
                     </div>
 
                     <div className="rounded-2xl border border-emerald-200 bg-white px-4 py-4">
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Generated NexaOS booking link</p>
-                      <p className="mt-2 break-all text-base font-semibold text-slate-950">{`${getPublicAppUrl()}/book/${workspace.slug}`}</p>
-                      <p className="mt-2 text-sm text-slate-600">
-                        Customers will choose a preferred service window. You can confirm the exact arrival time afterward.
-                      </p>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">NexaOS suggestion</p>
+                      <p className="mt-2 text-lg font-semibold text-slate-950">{bookingSuggestion.title}</p>
+                      <p className="mt-2 text-sm text-slate-600">{bookingSuggestion.description}</p>
+                      <div className="mt-4 grid gap-3 text-sm text-slate-700 md:grid-cols-2">
+                        <div>
+                          <p className="font-semibold text-slate-950">Work days</p>
+                          <p>{formatWorkDaySummary(bookingDays)}</p>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-slate-950">Hours</p>
+                          <p>{bookingStart} - {bookingEnd}</p>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-slate-950">Jobs per day</p>
+                          <p>{jobsPerDay === "5" ? "5+" : jobsPerDay}</p>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-slate-950">Job pattern</p>
+                          <p>{jobVariability === "same" ? "Usually about the same" : "They vary a lot"}</p>
+                        </div>
+                      </div>
+                      <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Generated NexaOS booking link</p>
+                        <p className="mt-2 break-all text-base font-semibold text-slate-950">{`${getPublicAppUrl()}/book/${workspace.slug}`}</p>
+                        <p className="mt-2 text-sm text-slate-600">
+                          Customers will request a service window first. You confirm the exact arrival time after that.
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -877,7 +985,7 @@ export default function GoLive() {
                 <div className="flex justify-end">
                   <Button className={primaryButtonClass} onClick={handleSaveBooking} disabled={savingBooking}>
                     {savingBooking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageSquare className="mr-2 h-4 w-4" />}
-                    Save booking and continue
+                    {bookingChoice === "nexaos" ? "Looks good, create my NexaOS booking link" : "Save booking and continue"}
                   </Button>
                 </div>
               </div>
@@ -933,7 +1041,13 @@ export default function GoLive() {
                   <div className="rounded-3xl border border-slate-200 bg-white p-5">
                     <MessageSquare className="h-5 w-5 text-emerald-600" />
                     <p className="mt-4 text-sm font-semibold text-slate-950">Booking step</p>
-                    <p className="mt-2 text-sm text-slate-600">{bookingChoice === "yes" ? "Link will be sent by SMS" : "NexaOS stops after qualification"}</p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      {config.booking_mode === "external"
+                        ? "External booking link will be sent by SMS"
+                        : config.booking_mode === "nexaos"
+                          ? "NexaOS service-window booking is ready"
+                          : "Booking setup still needs review"}
+                    </p>
                   </div>
                   <div className="rounded-3xl border border-slate-200 bg-white p-5">
                     <Clock3 className="h-5 w-5 text-emerald-600" />

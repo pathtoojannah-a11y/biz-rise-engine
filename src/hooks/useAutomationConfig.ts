@@ -17,6 +17,7 @@ export interface TwilioConfig {
     end_time: string;
     work_days: string[];
     jobs_per_day: number;
+    job_variability: "same" | "varies";
   };
   missed_call_sms: boolean;
   qualification_flow: boolean;
@@ -46,6 +47,7 @@ const DEFAULT_CONFIG: TwilioConfig = {
     end_time: "18:00",
     work_days: ["mon", "tue", "wed", "thu", "fri"],
     jobs_per_day: 3,
+    job_variability: "varies",
   },
   missed_call_sms: true,
   qualification_flow: true,
