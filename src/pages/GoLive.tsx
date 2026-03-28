@@ -8,6 +8,7 @@ import {
   Building2,
   CheckCircle2,
   Clock3,
+  ExternalLink,
   Loader2,
   MapPin,
   MessageSquare,
@@ -26,6 +27,7 @@ import { useWorkspace } from "@/hooks/useWorkspace";
 import { useAutomationConfig } from "@/hooks/useAutomationConfig";
 import { useLocations } from "@/hooks/useLocations";
 import { hasCoreSetup, isWorkspaceLive, normalizeOnboardingConfig, OnboardingConfig } from "@/lib/onboarding";
+import { formatTimezoneLabel, timezoneFromZip } from "@/lib/workspace-setup";
 import { toast } from "sonner";
 
 type BookingChoice = "external" | "nexaos" | null;
@@ -56,7 +58,7 @@ const STEP_LABELS = [
   "Text your NexaOS number",
   "Booking link",
   "Google reviews",
-  "Launch summary",
+  "Go live",
 ];
 
 const STEP_DESCRIPTIONS = [
@@ -65,7 +67,7 @@ const STEP_DESCRIPTIONS = [
   "Start the check, then text your NexaOS number from your saved cell so NexaOS can verify the SMS path.",
   "Choose an existing booking link or answer a few simple questions so NexaOS can suggest your booking setup.",
   "Paste your Google review link. High ratings go public. Low ratings stay private.",
-  "Review your setup, choose the hours NexaOS should text during, and go live.",
+  "Confirm everything looks right, then launch.",
 ];
 
 function normalizePhoneInput(value: string) {
@@ -266,6 +268,11 @@ export default function GoLive() {
   const [bookingDays, setBookingDays] = useState<WorkDay[]>(normalizeWorkDays(config.booking_settings.work_days));
   const [jobsPerDay, setJobsPerDay] = useState(String(config.booking_settings.jobs_per_day || 3));
   const [jobVariability, setJobVariability] = useState<JobVariability>(getJobVariability(config.booking_settings.job_variability));
+  const [businessName, setBusinessName] = useState(workspace?.name || "");
+  const [businessIndustry, setBusinessIndustry] = useState(workspace?.industry || "");
+  const [businessZip, setBusinessZip] = useState(workspace?.business_zip || "");
+  const [businessTimezone, setBusinessTimezone] = useState(workspace?.timezone || "America/New_York");
+  const [savingBusinessInfo, setSavingBusinessInfo] = useState(false);
   const [reviewLink, setReviewLink] = useState(existingReviewLink);
   const [officeStart, setOfficeStart] = useState(onboarding.office_open || config.office_hours.start || "08:00");
   const [officeEnd, setOfficeEnd] = useState(onboarding.office_close || config.office_hours.end || "18:00");
@@ -285,8 +292,12 @@ export default function GoLive() {
     );
   };
 
+  // Track the highest step the user has completed so the sidebar knows which steps are clickable.
+  // Do NOT auto-advance currentStep — let the user control navigation.
+  const [highestCompleted, setHighestCompleted] = useState(recommendedStep - 1);
+
   useEffect(() => {
-    setCurrentStep((previous) => (recommendedStep > previous ? recommendedStep : previous));
+    setHighestCompleted((prev) => Math.max(prev, recommendedStep - 1));
   }, [recommendedStep]);
 
   useEffect(() => {
@@ -360,6 +371,33 @@ export default function GoLive() {
 
     if (error) throw error;
     await refreshWorkspace();
+  };
+
+  const handleSaveBusinessInfo = async () => {
+    if (!businessName.trim()) {
+      toast.error("Enter your business name.");
+      return;
+    }
+    setSavingBusinessInfo(true);
+    try {
+      const { error } = await supabase
+        .from("workspaces")
+        .update({
+          name: businessName.trim(),
+          industry: businessIndustry.trim() || null,
+          business_zip: businessZip.trim() || null,
+          timezone: businessTimezone.trim() || "America/New_York",
+        })
+        .eq("id", workspace.id);
+      if (error) throw error;
+      await refreshWorkspace();
+      toast.success("Business info saved.");
+      setCurrentStep(1);
+    } catch (error: any) {
+      toast.error(error.message || "Could not save business info.");
+    } finally {
+      setSavingBusinessInfo(false);
+    }
   };
 
   const handleSavePhoneSetup = async () => {
@@ -557,7 +595,7 @@ export default function GoLive() {
     },
   });
 
-  const canSelectStep = (stepIndex: number) => stepIndex <= currentStep;
+  const canSelectStep = (stepIndex: number) => stepIndex <= Math.max(currentStep, highestCompleted + 1);
 
   const parsedJobsPerDay = Number(jobsPerDay);
   const bookingSuggestion = getWindowRecommendation(
@@ -573,6 +611,7 @@ export default function GoLive() {
       steps={STEP_LABELS}
       onStepSelect={setCurrentStep}
       canSelectStep={canSelectStep}
+      highestCompleted={highestCompleted}
     >
       <div className="space-y-6">
         <Card className="border-emerald-100/80 bg-white/95 shadow-xl shadow-emerald-100/60">
@@ -593,40 +632,59 @@ export default function GoLive() {
           </CardHeader>
           <CardContent className="space-y-6">
             {currentStep === 0 && (
-              <div className="grid gap-4 lg:grid-cols-3">
-                <div className="rounded-3xl border border-slate-200 bg-white p-5">
-                  <div className="flex items-center gap-3 text-slate-900">
-                    <Building2 className="h-5 w-5 text-emerald-600" />
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Business</p>
-                      <p className="mt-1 text-lg font-semibold">{workspace.name}</p>
-                    </div>
+              <div className="space-y-5">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="biz-name">Business name</Label>
+                    <Input
+                      id="biz-name"
+                      value={businessName}
+                      onChange={(e) => setBusinessName(e.target.value)}
+                      placeholder="Rob's HVAC"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="biz-industry">Trade</Label>
+                    <Input
+                      id="biz-industry"
+                      value={businessIndustry}
+                      onChange={(e) => setBusinessIndustry(e.target.value)}
+                      placeholder="HVAC, Plumbing, Electrical..."
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="biz-zip">ZIP code</Label>
+                    <Input
+                      id="biz-zip"
+                      value={businessZip}
+                      onChange={(e) => {
+                        const zip = e.target.value;
+                        setBusinessZip(zip);
+                        const tz = timezoneFromZip(zip);
+                        if (tz) setBusinessTimezone(tz);
+                      }}
+                      placeholder="48201"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="biz-tz">Timezone</Label>
+                    <select
+                      id="biz-tz"
+                      value={businessTimezone}
+                      onChange={(e) => setBusinessTimezone(e.target.value)}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                      {["America/New_York","America/Chicago","America/Denver","America/Los_Angeles","America/Phoenix"].map((tz) => (
+                        <option key={tz} value={tz}>{formatTimezoneLabel(tz)}</option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-500">Auto-set from ZIP. Change it if needed.</p>
                   </div>
                 </div>
-                <div className="rounded-3xl border border-slate-200 bg-white p-5">
-                  <div className="flex items-center gap-3 text-slate-900">
-                    <BadgeCheck className="h-5 w-5 text-emerald-600" />
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Trade</p>
-                      <p className="mt-1 text-lg font-semibold">{workspace.industry || "General Contractor"}</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="rounded-3xl border border-slate-200 bg-white p-5">
-                  <div className="flex items-center gap-3 text-slate-900">
-                    <MapPin className="h-5 w-5 text-emerald-600" />
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">ZIP / Timezone</p>
-                      <p className="mt-1 text-lg font-semibold">
-                        {workspace.business_zip || "Not set"} / {workspace.timezone || "Not set"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                <div className="lg:col-span-3 flex justify-end">
-                  <Button className={primaryButtonClass} onClick={() => setCurrentStep(1)}>
-                    Continue
-                    <ArrowRight className="ml-2 h-4 w-4" />
+                <div className="flex justify-end">
+                  <Button className={primaryButtonClass} onClick={handleSaveBusinessInfo} disabled={savingBusinessInfo}>
+                    {savingBusinessInfo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
+                    Save and continue
                   </Button>
                 </div>
               </div>
@@ -1026,6 +1084,15 @@ export default function GoLive() {
                         <p className="mt-2 text-sm text-slate-600">
                           Put this on your Google listing, website, and truck. Customers pick a service window and you confirm by text.
                         </p>
+                        <a
+                          href={`${getPublicAppUrl()}/book/${workspace.slug}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                          See what your clients see
+                        </a>
                       </div>
                     </div>
                   </div>
@@ -1065,61 +1132,93 @@ export default function GoLive() {
 
             {currentStep === 5 && (
               <div className="space-y-6">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="office-start">Open time</Label>
-                    <Input id="office-start" type="time" value={officeStart} onChange={(event) => setOfficeStart(event.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="office-end">Close time</Label>
-                    <Input id="office-end" type="time" value={officeEnd} onChange={(event) => setOfficeEnd(event.target.value)} />
-                  </div>
-                </div>
-
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <div className="rounded-3xl border border-slate-200 bg-white p-5">
                     <Phone className="h-5 w-5 text-emerald-600" />
                     <p className="mt-4 text-sm font-semibold text-slate-950">NexaOS number</p>
-                    <p className="mt-2 text-sm text-slate-600">{config.from_number || "Pending"}</p>
+                    <p className="mt-2 text-sm text-slate-600">{config.from_number || "Not assigned"}</p>
+                    {!config.from_number && (
+                      <button type="button" onClick={() => setCurrentStep(1)} className="mt-2 text-xs font-medium text-emerald-600 hover:underline">Fix this</button>
+                    )}
                   </div>
                   <div className="rounded-3xl border border-slate-200 bg-white p-5">
                     <ShieldCheck className="h-5 w-5 text-emerald-600" />
-                    <p className="mt-4 text-sm font-semibold text-slate-950">Activation</p>
-                    <p className="mt-2 text-sm text-slate-600">{onboarding.test_call_verified ? "SMS verified" : "Waiting for SMS verification"}</p>
+                    <p className="mt-4 text-sm font-semibold text-slate-950">SMS verified</p>
+                    <p className="mt-2 text-sm text-slate-600">{onboarding.test_call_verified ? "Connected" : "Not verified yet"}</p>
+                    {!onboarding.test_call_verified && (
+                      <button type="button" onClick={() => setCurrentStep(2)} className="mt-2 text-xs font-medium text-emerald-600 hover:underline">Fix this</button>
+                    )}
                   </div>
-                    <div className="rounded-3xl border border-slate-200 bg-white p-5">
-                      <MessageSquare className="h-5 w-5 text-emerald-600" />
-                      <p className="mt-4 text-sm font-semibold text-slate-950">Booking setup</p>
-                      <p className="mt-2 text-sm text-slate-600">
-                        {config.booking_mode === "external"
-                          ? "External booking link will be sent by SMS"
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                    <MessageSquare className="h-5 w-5 text-emerald-600" />
+                    <p className="mt-4 text-sm font-semibold text-slate-950">Booking</p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      {config.booking_mode === "external"
+                        ? "External link ready"
                         : config.booking_mode === "nexaos"
-                          ? "NexaOS service-window booking is ready"
-                          : "Booking setup still needs review"}
+                          ? "NexaOS booking ready"
+                          : "Not set up yet"}
+                    </p>
+                    {!config.booking_mode && (
+                      <button type="button" onClick={() => setCurrentStep(3)} className="mt-2 text-xs font-medium text-emerald-600 hover:underline">Fix this</button>
+                    )}
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                    <p className="mt-4 text-sm font-semibold text-slate-950">Google reviews</p>
+                    <p className="mt-2 text-sm text-slate-600">{existingReviewLink ? "Link saved" : "Not added yet"}</p>
+                    {!existingReviewLink && (
+                      <button type="button" onClick={() => setCurrentStep(4)} className="mt-2 text-xs font-medium text-emerald-600 hover:underline">Fix this</button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-emerald-100 bg-[linear-gradient(180deg,#ffffff_0%,#f0fdf4_100%)] p-5 space-y-4">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.16em] text-emerald-700">When should NexaOS text?</p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      NexaOS will only send automated texts inside these hours. No late-night messages.
                     </p>
                   </div>
-                    <div className="rounded-3xl border border-slate-200 bg-white p-5">
-                      <Clock3 className="h-5 w-5 text-emerald-600" />
-                      <p className="mt-4 text-sm font-semibold text-slate-950">NexaOS texting hours</p>
-                      <p className="mt-2 text-sm text-slate-600">{officeStart} - {officeEnd}</p>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="office-start">Open</Label>
+                      <select
+                        id="office-start"
+                        value={officeStart}
+                        onChange={(event) => setOfficeStart(event.target.value)}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
+                        {TIME_OPTIONS.map((t) => (
+                          <option key={t.value} value={t.value}>{t.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="office-end">Close</Label>
+                      <select
+                        id="office-end"
+                        value={officeEnd}
+                        onChange={(event) => setOfficeEnd(event.target.value)}
+                        className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
+                        {TIME_OPTIONS.map((t) => (
+                          <option key={t.value} value={t.value}>{t.label}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
+                </div>
 
-                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                    <p className="text-sm text-slate-700">
-                      Review the setup above, then go live. After this, NexaOS handles missed calls, lead qualification, booking prompts, contractor alerts, and review requests by text.
-                    </p>
-                  </div>
-
-                  <div className="flex justify-between gap-3">
-                    <Button variant="outline" onClick={() => setCurrentStep(3)}>
-                      Back to booking
-                    </Button>
-                    <Button className={primaryButtonClass} onClick={handleFinishSetup} disabled={!canFinish || finishingSetup}>
-                      {finishingSetup ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Clock3 className="mr-2 h-4 w-4" />}
-                      Save and go live
-                    </Button>
-                  </div>
+                <div className="flex justify-between gap-3">
+                  <Button variant="outline" onClick={() => setCurrentStep(4)}>
+                    Back
+                  </Button>
+                  <Button className={primaryButtonClass} onClick={handleFinishSetup} disabled={!canFinish || finishingSetup}>
+                    {finishingSetup ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ArrowRight className="mr-2 h-4 w-4" />}
+                    Go live
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>

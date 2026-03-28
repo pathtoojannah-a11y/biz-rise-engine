@@ -11,6 +11,7 @@ interface OnboardingLayoutProps {
   children: React.ReactNode;
   onStepSelect?: (stepIndex: number) => void;
   canSelectStep?: (stepIndex: number) => boolean;
+  highestCompleted?: number;
 }
 
 export function OnboardingLayout({
@@ -21,10 +22,11 @@ export function OnboardingLayout({
   children,
   onStepSelect,
   canSelectStep,
+  highestCompleted = -1,
 }: OnboardingLayoutProps) {
   const { signOut } = useAuth();
   const { workspace } = useWorkspace();
-  const progress = Math.round(((currentStep + 1) / steps.length) * 100);
+  const progress = Math.round(((Math.max(currentStep, highestCompleted + 1) + 1) / steps.length) * 100);
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_26%),linear-gradient(180deg,#ecfdf5_0%,#f8fafc_48%,#f8fafc_100%)]">
@@ -58,7 +60,7 @@ export function OnboardingLayout({
 
             <div className="space-y-2">
               {steps.map((step, index) => {
-                const complete = index < currentStep;
+                const complete = index <= highestCompleted;
                 const active = index === currentStep;
                 const selectable = onStepSelect ? (canSelectStep ? canSelectStep(index) : index <= currentStep) : false;
                 return (
