@@ -56,7 +56,7 @@ const STEP_LABELS = [
   "Text your NexaOS number",
   "Booking link",
   "Google reviews",
-  "Office hours",
+  "Launch summary",
 ];
 
 const STEP_DESCRIPTIONS = [
@@ -65,7 +65,7 @@ const STEP_DESCRIPTIONS = [
   "Start the check, then text your NexaOS number from your saved cell so NexaOS can verify the SMS path.",
   "Choose an existing booking link or answer a few simple questions so NexaOS can suggest your booking setup.",
   "Paste your Google review link. High ratings go public. Low ratings stay private.",
-  "Set reminder hours, finish setup, and unlock the workspace.",
+  "Review your setup, choose the hours NexaOS should text during, and go live.",
 ];
 
 function normalizePhoneInput(value: string) {
@@ -172,6 +172,30 @@ function getWindowRecommendation(jobsPerDay: number, jobVariability: JobVariabil
         ? "Because your jobs are usually more predictable, three tighter service windows are a good default."
         : "Because your jobs are usually more predictable, NexaOS recommends three tighter windows by default. You can still keep your current jobs-per-day if that fits better.",
   };
+}
+
+const TIME_OPTIONS = (() => {
+  const options: { value: string; label: string }[] = [];
+  for (let h = 5; h <= 22; h++) {
+    for (const m of [0, 30]) {
+      if (h === 22 && m === 30) break;
+      const value = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+      const suffix = h >= 12 ? "PM" : "AM";
+      const hour12 = h % 12 || 12;
+      const label = m === 0 ? `${hour12} ${suffix}` : `${hour12}:${String(m).padStart(2, "0")} ${suffix}`;
+      options.push({ value, label });
+    }
+  }
+  return options;
+})();
+
+function formatTimeLabel(value: string) {
+  const match = TIME_OPTIONS.find((o) => o.value === value);
+  if (match) return match.label;
+  const [h, m] = value.split(":").map(Number);
+  const suffix = h >= 12 ? "PM" : "AM";
+  const hour12 = h % 12 || 12;
+  return m === 0 ? `${hour12} ${suffix}` : `${hour12}:${String(m).padStart(2, "0")} ${suffix}`;
 }
 
 function getProvisioningErrorMessage(error: unknown) {
@@ -533,6 +557,8 @@ export default function GoLive() {
     },
   });
 
+  const canSelectStep = (stepIndex: number) => stepIndex <= currentStep;
+
   const parsedJobsPerDay = Number(jobsPerDay);
   const bookingSuggestion = getWindowRecommendation(
     Number.isFinite(parsedJobsPerDay) && parsedJobsPerDay > 0 ? parsedJobsPerDay : 3,
@@ -545,6 +571,8 @@ export default function GoLive() {
       description="Add your cell number once, get a new NexaOS business number, and let missed calls turn into text conversations automatically."
       currentStep={currentStep}
       steps={STEP_LABELS}
+      onStepSelect={setCurrentStep}
+      canSelectStep={canSelectStep}
     >
       <div className="space-y-6">
         <Card className="border-emerald-100/80 bg-white/95 shadow-xl shadow-emerald-100/60">
@@ -876,26 +904,34 @@ export default function GoLive() {
 
                     <div className="space-y-4">
                       <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
-                        <p className="text-base font-semibold text-slate-950">2. What time do you usually start and stop?</p>
-                        <p className="text-sm text-slate-500">Give NexaOS the normal range you want customers to book inside.</p>
+                        <p className="text-base font-semibold text-slate-950">2. What time do you open and close?</p>
+                        <p className="text-sm text-slate-500">The hours customers can request a visit inside.</p>
                         <div className="grid gap-4 md:grid-cols-2">
                           <div className="space-y-2">
-                            <Label htmlFor="booking-start">Start time</Label>
-                            <Input
+                            <Label htmlFor="booking-start">Open</Label>
+                            <select
                               id="booking-start"
-                              type="time"
                               value={bookingStart}
                               onChange={(event) => setBookingStart(event.target.value)}
-                            />
+                              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            >
+                              {TIME_OPTIONS.map((t) => (
+                                <option key={t.value} value={t.value}>{t.label}</option>
+                              ))}
+                            </select>
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="booking-end">End time</Label>
-                            <Input
+                            <Label htmlFor="booking-end">Close</Label>
+                            <select
                               id="booking-end"
-                              type="time"
                               value={bookingEnd}
                               onChange={(event) => setBookingEnd(event.target.value)}
-                            />
+                              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            >
+                              {TIME_OPTIONS.map((t) => (
+                                <option key={t.value} value={t.value}>{t.label}</option>
+                              ))}
+                            </select>
                           </div>
                         </div>
                       </div>
@@ -968,7 +1004,7 @@ export default function GoLive() {
                         </div>
                         <div>
                           <p className="font-semibold text-slate-950">Hours</p>
-                          <p>{bookingStart} - {bookingEnd}</p>
+                          <p>{formatTimeLabel(bookingStart)} - {formatTimeLabel(bookingEnd)}</p>
                         </div>
                         <div>
                           <p className="font-semibold text-slate-950">Jobs per day</p>
@@ -980,10 +1016,15 @@ export default function GoLive() {
                         </div>
                       </div>
                       <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Generated NexaOS booking link</p>
-                        <p className="mt-2 break-all text-base font-semibold text-slate-950">{`${getPublicAppUrl()}/book/${workspace.slug}`}</p>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Your booking link</p>
+                        <p className="mt-2 text-base font-semibold text-slate-950">
+                          nexaos.com/book/{workspace.slug}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-400 break-all">
+                          {`${getPublicAppUrl()}/book/${workspace.slug}`}
+                        </p>
                         <p className="mt-2 text-sm text-slate-600">
-                          Customers will request a service window first. You confirm the exact arrival time after that.
+                          Put this on your Google listing, website, and truck. Customers pick a service window and you confirm by text.
                         </p>
                       </div>
                     </div>
@@ -1046,36 +1087,39 @@ export default function GoLive() {
                     <p className="mt-4 text-sm font-semibold text-slate-950">Activation</p>
                     <p className="mt-2 text-sm text-slate-600">{onboarding.test_call_verified ? "SMS verified" : "Waiting for SMS verification"}</p>
                   </div>
-                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
-                    <MessageSquare className="h-5 w-5 text-emerald-600" />
-                    <p className="mt-4 text-sm font-semibold text-slate-950">Booking step</p>
-                    <p className="mt-2 text-sm text-slate-600">
-                      {config.booking_mode === "external"
-                        ? "External booking link will be sent by SMS"
+                    <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                      <MessageSquare className="h-5 w-5 text-emerald-600" />
+                      <p className="mt-4 text-sm font-semibold text-slate-950">Booking setup</p>
+                      <p className="mt-2 text-sm text-slate-600">
+                        {config.booking_mode === "external"
+                          ? "External booking link will be sent by SMS"
                         : config.booking_mode === "nexaos"
                           ? "NexaOS service-window booking is ready"
                           : "Booking setup still needs review"}
                     </p>
                   </div>
-                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
-                    <Clock3 className="h-5 w-5 text-emerald-600" />
-                    <p className="mt-4 text-sm font-semibold text-slate-950">Reminder hours</p>
-                    <p className="mt-2 text-sm text-slate-600">{officeStart} - {officeEnd}</p>
+                    <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                      <Clock3 className="h-5 w-5 text-emerald-600" />
+                      <p className="mt-4 text-sm font-semibold text-slate-950">NexaOS texting hours</p>
+                      <p className="mt-2 text-sm text-slate-600">{officeStart} - {officeEnd}</p>
+                    </div>
                   </div>
-                </div>
 
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                  <p className="text-sm text-slate-700">
-                    NexaOS will handle missed calls, lead qualification, contractor alerts, and review requests by text. The dashboard becomes optional after this.
-                  </p>
-                </div>
+                  <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                    <p className="text-sm text-slate-700">
+                      Review the setup above, then go live. After this, NexaOS handles missed calls, lead qualification, booking prompts, contractor alerts, and review requests by text.
+                    </p>
+                  </div>
 
-                <div className="flex justify-end">
-                  <Button className={primaryButtonClass} onClick={handleFinishSetup} disabled={!canFinish || finishingSetup}>
-                    {finishingSetup ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Clock3 className="mr-2 h-4 w-4" />}
-                    Save hours and finish
-                  </Button>
-                </div>
+                  <div className="flex justify-between gap-3">
+                    <Button variant="outline" onClick={() => setCurrentStep(3)}>
+                      Back to booking
+                    </Button>
+                    <Button className={primaryButtonClass} onClick={handleFinishSetup} disabled={!canFinish || finishingSetup}>
+                      {finishingSetup ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Clock3 className="mr-2 h-4 w-4" />}
+                      Save and go live
+                    </Button>
+                  </div>
               </div>
             )}
           </CardContent>

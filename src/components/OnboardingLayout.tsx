@@ -9,9 +9,19 @@ interface OnboardingLayoutProps {
   currentStep: number;
   steps: string[];
   children: React.ReactNode;
+  onStepSelect?: (stepIndex: number) => void;
+  canSelectStep?: (stepIndex: number) => boolean;
 }
 
-export function OnboardingLayout({ title, description, currentStep, steps, children }: OnboardingLayoutProps) {
+export function OnboardingLayout({
+  title,
+  description,
+  currentStep,
+  steps,
+  children,
+  onStepSelect,
+  canSelectStep,
+}: OnboardingLayoutProps) {
   const { signOut } = useAuth();
   const { workspace } = useWorkspace();
   const progress = Math.round(((currentStep + 1) / steps.length) * 100);
@@ -50,14 +60,18 @@ export function OnboardingLayout({ title, description, currentStep, steps, child
               {steps.map((step, index) => {
                 const complete = index < currentStep;
                 const active = index === currentStep;
+                const selectable = onStepSelect ? (canSelectStep ? canSelectStep(index) : index <= currentStep) : false;
                 return (
-                  <div
+                  <button
                     key={step}
+                    type="button"
+                    onClick={() => selectable && onStepSelect?.(index)}
+                    disabled={!selectable}
                     className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${
                       active
                         ? "border-emerald-400/40 bg-emerald-400/10 shadow-[0_12px_30px_-20px_rgba(52,211,153,0.7)]"
                         : "border-white/10 bg-white/[0.03]"
-                    }`}
+                    } ${selectable ? "text-left transition hover:border-emerald-300/30 hover:bg-white/[0.06]" : "text-left"}`}
                   >
                     {complete ? (
                       <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" />
@@ -68,7 +82,7 @@ export function OnboardingLayout({ title, description, currentStep, steps, child
                       <p className="text-[11px] uppercase tracking-[0.16em] text-slate-400">Step {index + 1}</p>
                       <p className="text-sm font-medium text-white">{step}</p>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>

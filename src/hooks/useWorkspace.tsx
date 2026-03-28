@@ -25,7 +25,18 @@ interface WorkspaceContextType {
 const WorkspaceContext = createContext<WorkspaceContextType | null>(null);
 
 function generateSlug(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + "-" + Math.random().toString(36).slice(2, 7);
+  const cleaned = name
+    .toLowerCase()
+    .replace(/'s\b/g, "s")           // "Rob's" → "Robs"
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  const short = cleaned
+    .split("-")
+    .filter((w) => !["business", "llc", "inc", "corp", "the", "and"].includes(w))
+    .join("-");
+  const base = short || cleaned || "biz";
+  const suffix = Math.random().toString(36).slice(2, 5); // 3 chars
+  return `${base}-${suffix}`;
 }
 
 function coerceWorkspace(rawWorkspace: any): Workspace {
