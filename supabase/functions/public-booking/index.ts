@@ -2,7 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
   buildWindowOccupancyMap,
   filterWindowGroupsByCapacity,
-} from "../../../src/lib/booking-flow.ts";
+} from "../_shared/booking-flow.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
