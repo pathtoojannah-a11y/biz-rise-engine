@@ -128,7 +128,7 @@ Deno.serve(async (req) => {
         .from("jobs")
         .select("id, lead_id, scheduled_at, status, leads!inner(name, phone)")
         .eq("workspace_id", integration.workspace_id)
-        .in("status", ["scheduled", "booked"])
+        .eq("status", "scheduled")
         .lte("scheduled_at", cutoffIso);
 
       for (const job of dueJobs || []) {

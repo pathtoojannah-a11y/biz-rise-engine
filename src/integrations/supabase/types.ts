@@ -814,7 +814,12 @@ export type Database = {
     Enums: {
       call_status: "missed" | "answered" | "voicemail"
       conversation_channel: "sms" | "call" | "form" | "email"
-      job_status: "scheduled" | "in_progress" | "completed" | "cancelled"
+      job_status:
+        | "pending_confirmation"
+        | "scheduled"
+        | "in_progress"
+        | "completed"
+        | "cancelled"
       lead_status: "new" | "contacted" | "qualified" | "unqualified" | "lost"
       member_status: "active" | "invited" | "disabled"
       review_outcome:
@@ -955,7 +960,13 @@ export const Constants = {
     Enums: {
       call_status: ["missed", "answered", "voicemail"],
       conversation_channel: ["sms", "call", "form", "email"],
-      job_status: ["scheduled", "in_progress", "completed", "cancelled"],
+      job_status: [
+        "pending_confirmation",
+        "scheduled",
+        "in_progress",
+        "completed",
+        "cancelled",
+      ],
       lead_status: ["new", "contacted", "qualified", "unqualified", "lost"],
       member_status: ["active", "invited", "disabled"],
       review_outcome: [

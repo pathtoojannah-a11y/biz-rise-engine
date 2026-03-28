@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { parseBookingConfirmationReply } from "../../../src/lib/booking-flow.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -179,6 +180,139 @@ async function sendReviewRequestForJob(
     leadId: job.leads.id,
     customerName: job.leads.name,
   };
+}
+
+function formatRequestedWindowLabel(window: Record<string, any> | null | undefined) {
+  if (!window) return "the requested service window";
+  const dayLabel = String(window.day_label || "").trim();
+  const label = String(window.label || "").trim();
+  const rangeLabel = String(window.range_label || "").trim();
+
+  if (dayLabel && label && rangeLabel) return `${dayLabel}, ${label} (${rangeLabel})`;
+  if (dayLabel && label) return `${dayLabel}, ${label}`;
+  return label || dayLabel || "the requested service window";
+}
+
+async function handleBookingConfirmationReply(
+  supabase: any,
+  workspaceId: string,
+  config: any,
+  body: string,
+) {
+  const { data: sessions } = await supabase
+    .from("automation_sessions")
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .eq("type", "booking_confirm")
+    .eq("status", "active")
+    .order("updated_at", { ascending: false })
+    .limit(1);
+
+  const session = sessions?.[0];
+  if (!session) return false;
+
+  const parsedReply = parseBookingConfirmationReply(body);
+  const answers = (session.answers as Record<string, any> | null) ?? {};
+  const jobId = String(answers.job_id || "");
+  const customerName = String(answers.customer_name || "the customer");
+  const customerPhone = String(answers.customer_phone || "");
+  const requestedWindow =
+    answers.requested_window && typeof answers.requested_window === "object"
+      ? (answers.requested_window as Record<string, any>)
+      : null;
+  const windowSummary = formatRequestedWindowLabel(requestedWindow);
+
+  if (!jobId || !customerPhone) return false;
+
+  if (parsedReply.action === "invalid") {
+    await sendSms(
+      config.from_number,
+      config.contractor_phone,
+      `Reply CONFIRM, CONFIRM 10AM, or CANCEL for ${customerName} (${windowSummary}).`,
+    );
+    return true;
+  }
+
+  if (parsedReply.action === "cancel") {
+    await supabase
+      .from("jobs")
+      .update({
+        status: "cancelled",
+        completed_at: null,
+      })
+      .eq("id", jobId);
+
+    await supabase
+      .from("automation_sessions")
+      .update({
+        status: "completed",
+        current_step: "cancelled",
+        answers: {
+          ...answers,
+          contractor_reply: "CANCEL",
+          responded_at: new Date().toISOString(),
+        },
+      })
+      .eq("id", session.id);
+
+    const customerMessage = `Your ${windowSummary} request has been cancelled. The contractor will follow up if you need a new service window.`;
+    await sendSms(config.from_number, customerPhone, customerMessage);
+    await supabase.from("conversations").insert({
+      workspace_id: workspaceId,
+      lead_id: session.lead_id,
+      channel: "sms",
+      direction: "outbound",
+      content: customerMessage,
+    });
+    await logEvent(supabase, workspaceId, "booking_request_cancelled", {
+      job_id: jobId,
+      customer_name: customerName,
+      requested_window: requestedWindow,
+    });
+    return true;
+  }
+
+  await supabase
+    .from("jobs")
+    .update({
+      status: "scheduled",
+      completed_at: null,
+    })
+    .eq("id", jobId);
+
+  await supabase
+    .from("automation_sessions")
+    .update({
+      status: "completed",
+      current_step: "confirmed",
+      answers: {
+        ...answers,
+        contractor_reply: parsedReply.arrivalText ? `CONFIRM ${parsedReply.arrivalText}` : "CONFIRM",
+        arrival_text: parsedReply.arrivalText,
+        responded_at: new Date().toISOString(),
+      },
+    })
+    .eq("id", session.id);
+
+  const customerMessage = parsedReply.arrivalText
+    ? `Your ${windowSummary} request is confirmed. Approximate arrival: ${parsedReply.arrivalText}.`
+    : `Your ${windowSummary} request is confirmed. The contractor will follow up if they need to narrow the exact arrival time.`;
+
+  await sendSms(config.from_number, customerPhone, customerMessage);
+  await supabase.from("conversations").insert({
+    workspace_id: workspaceId,
+    lead_id: session.lead_id,
+    channel: "sms",
+    direction: "outbound",
+    content: customerMessage,
+  });
+  await logEvent(supabase, workspaceId, "booking_request_confirmed", {
+    job_id: jobId,
+    customer_name: customerName,
+    requested_window: requestedWindow,
+    arrival_text: parsedReply.arrivalText,
+  });
+  return true;
 }
 
 async function handleReviewRating(
@@ -562,6 +696,11 @@ Deno.serve(async (req) => {
     if (contractorPhone && normalizedFrom === contractorPhone) {
       const verified = await handleOnboardingSmsVerification(supabase, workspace_id, config, fromNumber, body);
       if (verified) {
+        return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
+      }
+
+      const bookingHandled = await handleBookingConfirmationReply(supabase, workspace_id, config, body);
+      if (bookingHandled) {
         return new Response("<Response/>", { headers: { "Content-Type": "text/xml" } });
       }
 

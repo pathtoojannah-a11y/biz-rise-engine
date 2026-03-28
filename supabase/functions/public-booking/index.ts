@@ -1,4 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
+  buildWindowOccupancyMap,
+  filterWindowGroupsByCapacity,
+} from "../../../src/lib/booking-flow.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -262,6 +266,49 @@ async function sendSms(from: string, to: string, body: string) {
   });
 }
 
+async function loadWindowOccupancy(
+  supabase: ReturnType<typeof getServiceClient>,
+  workspaceId: string,
+  scheduledAts: string[],
+) {
+  if (scheduledAts.length === 0) {
+    return {};
+  }
+
+  const { data: jobs, error } = await supabase
+    .from("jobs")
+    .select("scheduled_at")
+    .eq("workspace_id", workspaceId)
+    .in("status", ["pending_confirmation", "scheduled"])
+    .in("scheduled_at", scheduledAts);
+
+  if (error) throw error;
+
+  return buildWindowOccupancyMap(
+    (jobs || [])
+      .map((job) => String(job.scheduled_at || ""))
+      .filter(Boolean),
+  );
+}
+
+function getRequestedWindowSummary(group: BookingWindowGroup, window: BookingWindow) {
+  return `${group.day_label}, ${window.label} (${window.range_label})`;
+}
+
+function getPendingCustomerMessage(customerName: string, businessName: string, windowSummary: string) {
+  return `Thanks ${customerName}! We got your request for ${windowSummary}. ${businessName} will confirm the exact arrival time shortly.`;
+}
+
+function getContractorBookingPrompt(
+  customerName: string,
+  customerPhone: string,
+  windowSummary: string,
+  serviceType: string,
+) {
+  const servicePrefix = serviceType ? `${serviceType} | ` : "";
+  return `New booking request: ${servicePrefix}${customerName}\n${windowSummary}\n${customerPhone}\nReply CONFIRM, CONFIRM 10AM, or CANCEL.`;
+}
+
 async function resolveWorkspaceBooking(supabase: ReturnType<typeof getServiceClient>, slug: string) {
   const { data: workspace, error: workspaceError } = await supabase
     .from("workspaces")
@@ -325,7 +372,13 @@ Deno.serve(async (req) => {
     }
 
     const { workspace, config, bookingSettings } = await resolveWorkspaceBooking(supabase, slug);
-    const windowGroups = buildWindowGroups(bookingSettings);
+    const baseWindowGroups = buildWindowGroups(bookingSettings);
+    const occupancy = await loadWindowOccupancy(
+      supabase,
+      workspace.id,
+      baseWindowGroups.flatMap((group) => group.windows.map((window) => window.scheduled_at)),
+    );
+    const windowGroups = filterWindowGroupsByCapacity(baseWindowGroups, occupancy, 1);
 
     if (action === "load") {
       return new Response(
@@ -424,12 +477,28 @@ Deno.serve(async (req) => {
       .limit(1)
       .maybeSingle();
 
+    const { count: existingWindowCount, error: existingWindowError } = await supabase
+      .from("jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("workspace_id", workspace.id)
+      .eq("scheduled_at", matchedWindow.scheduled_at)
+      .in("status", ["pending_confirmation", "scheduled"]);
+
+    if (existingWindowError) throw existingWindowError;
+
+    if ((existingWindowCount || 0) >= 1) {
+      return new Response(JSON.stringify({ error: "That service window was just taken. Refresh and pick another one." }), {
+        status: 409,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { data: existingJob } = await supabase
       .from("jobs")
       .select("id")
       .eq("workspace_id", workspace.id)
       .eq("lead_id", leadId)
-      .in("status", ["scheduled", "booked", "in_progress"])
+      .in("status", ["pending_confirmation", "scheduled", "in_progress"])
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -440,7 +509,7 @@ Deno.serve(async (req) => {
       const { error: updateJobError } = await supabase
         .from("jobs")
         .update({
-          status: "scheduled",
+          status: "pending_confirmation",
           scheduled_at: matchedWindow.scheduled_at,
           stage_id: firstStage?.id ?? null,
         })
@@ -453,7 +522,7 @@ Deno.serve(async (req) => {
           workspace_id: workspace.id,
           lead_id: leadId,
           stage_id: firstStage?.id ?? null,
-          status: "scheduled",
+          status: "pending_confirmation",
           scheduled_at: matchedWindow.scheduled_at,
         })
         .select("id")
@@ -462,7 +531,7 @@ Deno.serve(async (req) => {
       jobId = insertedJob.id;
     }
 
-    const windowSummary = `${matchedGroup.day_label}, ${matchedWindow.label}`;
+    const windowSummary = getRequestedWindowSummary(matchedGroup, matchedWindow);
 
     await supabase.from("workflow_logs").insert({
       workspace_id: workspace.id,
@@ -483,13 +552,54 @@ Deno.serve(async (req) => {
       },
     });
 
+    let contractorMessageSid: string | null = null;
+
     if (typeof config.from_number === "string" && typeof config.contractor_phone === "string") {
-      const servicePrefix = serviceType ? `${serviceType} | ` : "";
-      await sendSms(
+      const contractorSms = await sendSms(
         config.from_number,
         config.contractor_phone,
-        `New booking request: ${servicePrefix}${customerName}\n${windowSummary}\n${customerPhone}\nConfirm the exact arrival time with the customer.`,
+        getContractorBookingPrompt(customerName, customerPhone, windowSummary, serviceType),
       );
+      contractorMessageSid = contractorSms?.sid || null;
+    }
+
+    await supabase.from("automation_sessions").upsert(
+      {
+        workspace_id: workspace.id,
+        lead_id: leadId,
+        type: "booking_confirm",
+        status: "active",
+        current_step: "awaiting_confirmation",
+        last_message_sid: contractorMessageSid,
+        answers: {
+          job_id: jobId,
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          service_type: serviceType || null,
+          requested_window: {
+            day_label: matchedGroup.day_label,
+            label: matchedWindow.label,
+            range_label: matchedWindow.range_label,
+            value: matchedWindow.value,
+            scheduled_at: matchedWindow.scheduled_at,
+          },
+          reminder_sent_at: null,
+          requested_at: new Date().toISOString(),
+        },
+      },
+      { onConflict: "workspace_id,lead_id,type" },
+    );
+
+    if (typeof config.from_number === "string") {
+      const customerMessage = getPendingCustomerMessage(customerName, workspace.name, windowSummary);
+      await sendSms(config.from_number, customerPhone, customerMessage);
+      await supabase.from("conversations").insert({
+        workspace_id: workspace.id,
+        lead_id: leadId,
+        channel: "sms",
+        direction: "outbound",
+        content: customerMessage,
+      });
     }
 
     return new Response(

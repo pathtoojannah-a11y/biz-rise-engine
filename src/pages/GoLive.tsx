@@ -155,32 +155,22 @@ function getWindowRecommendation(jobsPerDay: number, jobVariability: JobVariabil
     };
   }
 
-  if (jobsPerDay === 2) {
+  if (jobVariability === "varies") {
     return {
-      title: "Morning and afternoon windows",
+      title: "Suggested: morning and afternoon windows",
       description:
-        jobVariability === "same"
-          ? "This keeps things simple and still gives customers two clear choices."
-          : "Because jobs vary, wider morning and afternoon windows are the safest recommendation.",
-    };
-  }
-
-  if (jobsPerDay === 3) {
-    return {
-      title: "Morning, midday, and afternoon windows",
-      description:
-        jobVariability === "same"
-          ? "This gives you a balanced day without forcing exact-time scheduling."
-          : "This is the best default for variable field work because customers pick a window and you confirm the exact arrival later.",
+        jobsPerDay === 2
+          ? "Because jobs vary, two wider service windows are the safest default. Customers pick a window and you confirm the exact arrival later."
+          : "Because jobs vary, NexaOS recommends wider morning and afternoon windows first. You can still keep your current jobs-per-day if you want more windows.",
     };
   }
 
   return {
-    title: "Shorter windows across the day",
+    title: "Suggested: morning, midday, and afternoon windows",
     description:
-      jobVariability === "same"
-        ? "Because your jobs are more predictable, NexaOS can safely offer more windows in a day."
-        : "NexaOS can still offer more windows, but the contractor should confirm the exact arrival time after booking.",
+      jobsPerDay === 3
+        ? "Because your jobs are usually more predictable, three tighter service windows are a good default."
+        : "Because your jobs are usually more predictable, NexaOS recommends three tighter windows by default. You can still keep your current jobs-per-day if that fits better.",
   };
 }
 
