@@ -110,8 +110,20 @@ function isValidBookingUrl(value: string) {
   }
 }
 
+const DEFAULT_PUBLIC_APP_URL = "https://biz-rise-engine-git-main-pathtoojannah-a11ys-projects.vercel.app";
+
 function getPublicAppUrl() {
-  return (import.meta.env.VITE_APP_URL as string | undefined)?.trim() || window.location.origin;
+  const configured = (import.meta.env.VITE_APP_URL as string | undefined)?.trim();
+  if (configured) return configured.replace(/\/$/, "");
+
+  const origin = window.location.origin.replace(/\/$/, "");
+  const hostname = window.location.hostname.toLowerCase();
+
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return DEFAULT_PUBLIC_APP_URL;
+  }
+
+  return origin;
 }
 
 function normalizeWorkDays(value: unknown): WorkDay[] {
@@ -872,27 +884,35 @@ export default function GoLive() {
                       <p className="text-sm text-slate-500">Tap the days you normally want customers to request visits.</p>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-4">
                       <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
-                        <Label htmlFor="booking-start">2. What time do you usually start?</Label>
-                        <Input
-                          id="booking-start"
-                          type="time"
-                          value={bookingStart}
-                          onChange={(event) => setBookingStart(event.target.value)}
-                        />
+                        <p className="text-base font-semibold text-slate-950">2. What time do you usually start and stop?</p>
+                        <p className="text-sm text-slate-500">Give NexaOS the normal range you want customers to book inside.</p>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label htmlFor="booking-start">Start time</Label>
+                            <Input
+                              id="booking-start"
+                              type="time"
+                              value={bookingStart}
+                              onChange={(event) => setBookingStart(event.target.value)}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="booking-end">End time</Label>
+                            <Input
+                              id="booking-end"
+                              type="time"
+                              value={bookingEnd}
+                              onChange={(event) => setBookingEnd(event.target.value)}
+                            />
+                          </div>
+                        </div>
                       </div>
+
                       <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
-                        <Label htmlFor="booking-end">What time do you usually stop?</Label>
-                        <Input
-                          id="booking-end"
-                          type="time"
-                          value={bookingEnd}
-                          onChange={(event) => setBookingEnd(event.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
-                        <Label>3. How many jobs can you usually handle in a day?</Label>
+                        <p className="text-base font-semibold text-slate-950">3. How many jobs can you usually handle in a day?</p>
+                        <p className="text-sm text-slate-500">NexaOS uses this to suggest the number of service windows to offer.</p>
                         <div className="flex flex-wrap gap-2">
                           {["1", "2", "3", "4", "5"].map((value) => (
                             <button
@@ -909,12 +929,11 @@ export default function GoLive() {
                             </button>
                           ))}
                         </div>
-                        <p className="text-sm text-slate-500">
-                          NexaOS uses this to suggest simple service windows instead of rigid time slots.
-                        </p>
                       </div>
+
                       <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
-                        <Label>4. Do jobs usually take about the same amount of time?</Label>
+                        <p className="text-base font-semibold text-slate-950">4. Do jobs usually take about the same amount of time?</p>
+                        <p className="text-sm text-slate-500">If they vary a lot, NexaOS leans toward wider windows so you can confirm the exact arrival later.</p>
                         <div className="flex flex-wrap gap-2">
                           {[
                             { value: "same", label: "Usually about the same" },
@@ -934,12 +953,11 @@ export default function GoLive() {
                             </button>
                           ))}
                         </div>
-                        <p className="text-sm text-slate-500">
-                          If jobs vary a lot, NexaOS leans toward wider windows so you can confirm the exact arrival later.
-                        </p>
                       </div>
-                      <div className="space-y-2 md:col-span-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
-                        <Label htmlFor="booking-timezone">Timezone</Label>
+
+                      <div className="space-y-2 rounded-2xl border border-emerald-100 bg-white px-4 py-4">
+                        <p className="text-base font-semibold text-slate-950">5. Timezone</p>
+                        <p className="text-sm text-slate-500">Leave this as-is unless your business runs from a different timezone.</p>
                         <Input
                           id="booking-timezone"
                           value={bookingTimezone}
